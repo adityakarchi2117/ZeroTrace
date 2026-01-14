@@ -1,0 +1,13 @@
+# CipherLink Streamlit Client Requirements
+
+# Core Framework
+streamlit>=1.30.0
+
+# HTTP Client
+requests>=2.31.0
+
+# Cryptography
+PyNaCl>=1.5.0
+
+# Utilities
+python-dateutil>=2.8.0
