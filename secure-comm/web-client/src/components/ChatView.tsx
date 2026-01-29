@@ -1148,6 +1148,18 @@ export default function ChatView() {
                         <span className={`${fontClasses.xs} opacity-60`}>
                           {format(item.date, 'HH:mm')}
                         </span>
+                        {!isDeleted && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMessageContextMenu(e, msg.id, isMine);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-400 transition-opacity"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                         {isMine && getMessageStatus(msg)}
                       </div>
                     </div>

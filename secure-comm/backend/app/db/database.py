@@ -78,6 +78,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, nullable=True)
+    settings = Column(JSON, nullable=True)  # User preferences (theme, etc.)
     
     # Relationships
     devices = relationship("Device", back_populates="user", cascade="all, delete-orphan")
@@ -119,6 +120,9 @@ class CallLog(Base):
     start_time = Column(DateTime, default=datetime.utcnow)
     end_time = Column(DateTime, nullable=True)
     duration_seconds = Column(Integer, default=0)
+    
+    caller_deleted = Column(Boolean, default=False)
+    receiver_deleted = Column(Boolean, default=False)
     
     caller = relationship("User", foreign_keys=[caller_id], back_populates="initiated_calls")
     receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_calls")
@@ -196,6 +200,14 @@ class Message(Base):
     # For file messages
     file_id = Column(String(100), nullable=True)
     file_metadata = Column(JSON, nullable=True)
+    
+    # Theme synchronization (unencrypted UI metadata)
+    sender_theme = Column(JSON, nullable=True)
+    
+    # Soft deletion for each user
+    sender_deleted = Column(Boolean, default=False)
+    recipient_deleted = Column(Boolean, default=False)
+
     
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")

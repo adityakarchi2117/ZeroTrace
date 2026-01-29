@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { showMessage } from 'react-native-flash-message';
 
 // API Configuration
-const API_BASE_URL = __DEV__ 
+const API_BASE_URL = __DEV__
   ? 'http://localhost:8000/api'  // Development
   : 'https://api.cipherlink.app/api';  // Production
 
@@ -35,7 +35,7 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     console.error('Response error:', error.response?.status, error.response?.data);
-    
+
     // Handle common errors
     if (error.response?.status === 401) {
       showMessage({
@@ -57,7 +57,7 @@ apiClient.interceptors.response.use(
         type: 'danger',
       });
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -66,7 +66,7 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   login: (username: string, password: string) =>
     apiClient.post('/auth/login', { username, password }),
-  
+
   register: (userData: {
     username: string;
     email: string;
@@ -74,7 +74,7 @@ export const authAPI = {
     public_key: string;
     identity_key: string;
   }) => apiClient.post('/auth/register', userData),
-  
+
   me: () => apiClient.get('/auth/me'),
 };
 
@@ -86,16 +86,16 @@ export const keysAPI = {
     signed_prekey_signature: string;
     one_time_prekeys: string[];
   }) => apiClient.post('/keys/upload', keyData),
-  
+
   getKeyBundle: (username: string) =>
     apiClient.get(`/keys/bundle/${username}`),
-  
+
   getPublicKey: (username: string) =>
     apiClient.get(`/keys/${username}`),
-  
+
   getPrekeyCount: () =>
     apiClient.get('/keys/prekeys/count'),
-  
+
   refillPrekeys: (prekeys: string[]) =>
     apiClient.post('/keys/prekeys/refill', { one_time_prekeys: prekeys }),
 };
@@ -106,36 +106,44 @@ export const messagesAPI = {
     encrypted_content: string;
     message_type: string;
     expiry_type?: string;
+    sender_theme?: any;
+    file_metadata?: any;
   }) => apiClient.post('/messages/send', messageData),
-  
+
   getConversation: (username: string, page: number = 1, limit: number = 50) =>
     apiClient.get(`/messages/conversation/${username}`, {
       params: { page, limit }
     }),
-  
+
   getUnread: () =>
     apiClient.get('/messages/unread'),
-  
+
   markAsRead: (messageId: number) =>
     apiClient.post(`/messages/${messageId}/read`),
+
+  deleteMessage: (messageId: number) =>
+    apiClient.delete(`/messages/${messageId}`),
+
+  deleteConversation: (username: string) =>
+    apiClient.delete(`/messages/conversation/${username}`),
 };
 
 export const contactsAPI = {
   getContacts: () =>
     apiClient.get('/contacts'),
-  
+
   addContact: (username: string, nickname?: string) =>
     apiClient.post('/contacts', { username, nickname }),
-  
+
   removeContact: (contactId: number) =>
     apiClient.delete(`/contacts/${contactId}`),
-  
+
   blockContact: (contactId: number) =>
     apiClient.post(`/contacts/${contactId}/block`),
-  
+
   searchUsers: (query: string) =>
     apiClient.get('/contacts/search', { params: { q: query } }),
-  
+
   getConversations: () =>
     apiClient.get('/contacts/conversations'),
 };
@@ -143,7 +151,7 @@ export const contactsAPI = {
 export const vaultAPI = {
   getItems: (page: number = 1, limit: number = 50) =>
     apiClient.get('/vault/items', { params: { page, limit } }),
-  
+
   createItem: (itemData: {
     encrypted_content: string;
     encrypted_key: string;
@@ -152,16 +160,16 @@ export const vaultAPI = {
     encrypted_title?: string;
     encrypted_tags?: string;
   }) => apiClient.post('/vault/items', itemData),
-  
+
   getItem: (itemId: number) =>
     apiClient.get(`/vault/items/${itemId}`),
-  
+
   updateItem: (itemId: number, itemData: any) =>
     apiClient.put(`/vault/items/${itemId}`, itemData),
-  
+
   deleteItem: (itemId: number, permanent: boolean = false) =>
     apiClient.delete(`/vault/items/${itemId}`, { params: { permanent } }),
-  
+
   syncItems: (lastSyncToken?: string) =>
     apiClient.post('/vault/sync', { last_sync_token: lastSyncToken }),
 };

@@ -4,7 +4,11 @@ Database operations for encrypted messages
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, not_
+
+# ... rest of imports
+
+
 from datetime import datetime
 from typing import List, Optional
 
@@ -25,7 +29,8 @@ class MessageRepository:
         expiry_type: str = "none",
         expires_at: datetime = None,
         reply_to_id: int = None,
-        file_metadata: dict = None
+        file_metadata: dict = None,
+        sender_theme: dict = None
     ) -> Message:
         """Create a new encrypted message."""
         message = Message(
@@ -38,6 +43,7 @@ class MessageRepository:
             expires_at=expires_at,
             reply_to_id=reply_to_id,
             file_metadata=file_metadata,
+            sender_theme=sender_theme,
             status=MessageStatusEnum.SENT
         )
         self.db.add(message)
@@ -64,7 +70,9 @@ class MessageRepository:
                 and_(Message.sender_id == user2_id, Message.recipient_id == user1_id)
             ),
             Message.status != MessageStatusEnum.DELETED,
-            Message.status != MessageStatusEnum.EXPIRED
+            Message.status != MessageStatusEnum.EXPIRED,
+            not_(and_(Message.sender_id == user1_id, Message.sender_deleted == True)),
+            not_(and_(Message.recipient_id == user1_id, Message.recipient_deleted == True))
         )
         
         if before_id:
@@ -154,7 +162,9 @@ class MessageRepository:
                 and_(Message.sender_id == user2_id, Message.recipient_id == user1_id)
             ),
             Message.status != MessageStatusEnum.DELETED,
-            Message.status != MessageStatusEnum.EXPIRED
+            Message.status != MessageStatusEnum.EXPIRED,
+            not_(and_(Message.sender_id == user1_id, Message.sender_deleted == True)),
+            not_(and_(Message.recipient_id == user1_id, Message.recipient_deleted == True))
         ).order_by(Message.created_at.desc()).offset(offset).limit(limit).all()
         
         # Reverse to chronological order

@@ -17,7 +17,10 @@ class MessageService:
         from sqlalchemy import or_
         
         calls = self.db.query(CallLog).filter(
-            or_(CallLog.caller_id == user_id, CallLog.receiver_id == user_id)
+            or_(
+                (CallLog.caller_id == user_id) & (CallLog.caller_deleted == False),
+                (CallLog.receiver_id == user_id) & (CallLog.receiver_deleted == False)
+            )
         ).order_by(CallLog.start_time.desc()).limit(50).all()
         
         # Add usernames
@@ -47,7 +50,8 @@ class MessageService:
         encrypted_key: str = None,
         expiry_type: str = "none",
         message_type: str = "text",
-        file_metadata: dict = None
+        file_metadata: dict = None,
+        sender_theme: dict = None
     ):
         """Send an encrypted message to a recipient."""
         recipient = self.user_repo.get_by_username(recipient_username)
@@ -61,7 +65,8 @@ class MessageService:
             encrypted_key=encrypted_key,
             message_type=message_type,
             expiry_type=expiry_type,
-            file_metadata=file_metadata
+            file_metadata=file_metadata,
+            sender_theme=sender_theme
         )
         
         return self._add_usernames_to_message(message)
@@ -136,7 +141,7 @@ class MessageService:
             peer_id = conv.peer_id
             peer = self.db.query(User).filter(User.id == peer_id).first()
             if peer:
-                # Get last 20 messages for this conversation
+                # Get last 20 messages for this conversation (paginated handles filtering)
                 messages = self.message_repo.get_conversation_paginated(user_id, peer_id, 20, 0)
                 for msg in messages:
                     self._add_usernames_to_message(msg)
@@ -144,6 +149,29 @@ class MessageService:
                 result[peer.username] = messages
         
         return result
+
+    def delete_call_history(self, user_id: int, peer_username: str) -> bool:
+        """Delete call history with a peer (soft delete)."""
+        peer = self.user_repo.get_by_username(peer_username)
+        if not peer:
+            return False
+            
+        # Find calls involving both users
+        calls = self.db.query(CallLog).filter(
+            or_(
+                (CallLog.caller_id == user_id) & (CallLog.receiver_id == peer.id),
+                (CallLog.caller_id == peer.id) & (CallLog.receiver_id == user_id)
+            )
+        ).all()
+        
+        for call in calls:
+            if call.caller_id == user_id:
+                call.caller_deleted = True
+            elif call.receiver_id == user_id:
+                call.receiver_deleted = True
+                
+        self.db.commit()
+        return True
     
     def delete_message(self, message_id: int, user_id: int) -> bool:
         """Delete a specific message. Only the sender can delete."""
@@ -165,13 +193,19 @@ class MessageService:
         if not peer:
             return False
         
-        # Delete all messages where current user is either sender or recipient with this peer
-        self.db.query(Message).filter(
+        # Soft delete messages for this user
+        messages = self.db.query(Message).filter(
             or_(
                 (Message.sender_id == user_id) & (Message.recipient_id == peer.id),
                 (Message.sender_id == peer.id) & (Message.recipient_id == user_id)
             )
-        ).delete(synchronize_session=False)
+        ).all()
+        
+        for message in messages:
+            if message.sender_id == user_id:
+                message.sender_deleted = True
+            if message.recipient_id == user_id:
+                message.recipient_deleted = True
         
         self.db.commit()
         return True

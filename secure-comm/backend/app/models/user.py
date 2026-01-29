@@ -29,6 +29,7 @@ class UserResponse(UserBase):
     created_at: datetime
     is_verified: bool = False
     last_seen: Optional[datetime] = None
+    settings: Optional[dict] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +41,7 @@ class UserProfile(BaseModel):
     identity_key: Optional[str] = None
     is_online: bool = False
     last_seen: Optional[datetime] = None
+    settings: Optional[dict] = None
 
 
 # ============ Device & Key Management ============
@@ -142,3 +144,9 @@ class UserSearchResult(BaseModel):
 class ContactAdd(BaseModel):
     username: str
     nickname: Optional[str] = None
+
+
+class UserSettingsUpdate(BaseModel):
+    """Update user settings/preferences"""
+    settings: dict
+

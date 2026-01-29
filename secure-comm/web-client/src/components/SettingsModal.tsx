@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance, accentColors, ThemeMode, AccentColor, FontSize, ChatDensity } from '@/lib/useAppearance';
+import { api } from '@/lib/api';
 import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type } from 'lucide-react';
 import { loadBubbleStyle, saveBubbleStyle, loadFontStyle, saveFontStyle, bubbleStyles, fontStyles } from '@/lib/themeSync';
 
@@ -39,6 +40,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     animationsEnabled: boolean;
   }>) => {
     updateSettings(newSettings);
+    api.updateSettings(newSettings).catch(e => console.error('Failed to save settings to server:', e));
   };
 
   // Update bubble style
@@ -456,16 +458,16 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             key={option.value}
                             onClick={() => handleBubbleStyleChange(option.value)}
                             className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all ${isSelected
-                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                               }`}
                           >
                             <div
                               className={`w-12 h-8 rounded-lg flex items-center justify-center ${option.value === 'glass'
-                                  ? 'backdrop-blur-md border border-white/20'
-                                  : option.value === 'neon'
-                                    ? 'shadow-lg'
-                                    : ''
+                                ? 'backdrop-blur-md border border-white/20'
+                                : option.value === 'neon'
+                                  ? 'shadow-lg'
+                                  : ''
                                 }`}
                               style={{
                                 background: `linear-gradient(135deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary})`,
@@ -499,8 +501,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             key={option.value}
                             onClick={() => handleFontStyleChange(option.value)}
                             className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${isSelected
-                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                               }`}
                           >
                             <Type className={`w-5 h-5 ${isSelected ? 'text-blue-500' : 'text-gray-500'}`} />

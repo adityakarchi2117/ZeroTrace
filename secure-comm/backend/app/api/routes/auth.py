@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.user_repo import UserRepository
 from app.core.security import verify_password, create_access_token, get_password_hash
-from app.models.user import UserCreate, UserResponse, Token
+from app.models.user import UserCreate, UserResponse, Token, UserSettingsUpdate
 from datetime import timedelta
 from app.core.config import settings
 
@@ -81,5 +81,37 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
+    
+    return user
+
+
+@router.patch("/me/settings", response_model=UserResponse)
+async def update_settings(
+    settings_update: UserSettingsUpdate,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Update user settings."""
+    from app.core.security import decode_access_token
+    
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        
+    username = payload.get("sub")
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_username(username)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Update settings
+    # Merge with existing settings if any
+    current_settings = user.settings or {}
+    updated_settings = {**current_settings, **settings_update.settings}
+    
+    user.settings = updated_settings
+    db.commit()
+    db.refresh(user)
     
     return user

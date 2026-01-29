@@ -62,6 +62,7 @@ class MessageResponse(BaseModel):
     expires_at: Optional[datetime] = None
     file_metadata: Optional[dict] = None
     reply_to_id: Optional[int] = None
+    sender_theme: Optional[dict] = None
     created_at: datetime
     delivered_at: Optional[datetime] = None
     read_at: Optional[datetime] = None

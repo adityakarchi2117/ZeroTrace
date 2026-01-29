@@ -190,5 +190,23 @@ async def delete_conversation(
     message_service = MessageService(db)
     
     message_service.delete_conversation(user_id, username)
+    message_service.delete_call_history(user_id, username)
     return None
+
+
+@router.delete("/calls/history/{username}")
+async def delete_call_history(
+    username: str,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Delete call history with a specific user."""
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        
+    user_id = payload.get("user_id")
+    message_service = MessageService(db)
+    message_service.delete_call_history(user_id, username)
+    return {"status": "success"}
 
