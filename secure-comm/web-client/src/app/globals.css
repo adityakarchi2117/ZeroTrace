@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Theme Variables ===== */
+:root {
+  /* Default accent colors (can be overridden by JS) */
+  --color-cipher-primary: #6366f1;
+  --color-cipher-secondary: #8b5cf6;
+  
+  /* Static brand colors */
+  --cipher-primary: var(--color-cipher-primary);
+  --cipher-secondary: var(--color-cipher-secondary);
+  --cipher-accent: #06b6d4;
+  
+  /* Font size (can be overridden by JS) */
+  --base-font-size: 16px;
+}
+
+/* Dark theme (default) */
+:root, .dark {
+  --cipher-dark: #0f0f23;
+  --cipher-darker: #080816;
+  --cipher-light: #1a1a2e;
+  --bg-primary: #080816;
+  --bg-secondary: #0f0f23;
+  --bg-tertiary: #1a1a2e;
+  --text-primary: #ffffff;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border-color: #374151;
+  color-scheme: dark;
+}
+
+/* Light theme */
+:root:not(.dark) {
+  --cipher-dark: #f3f4f6;
+  --cipher-darker: #ffffff;
+  --cipher-light: #e5e7eb;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --border-color: #e5e7eb;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html {
+  font-size: var(--base-font-size);
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* Reduced motion for accessibility */
+.reduce-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Light theme specific overrides */
+:root:not(.dark) .bg-cipher-dark {
+  background-color: var(--bg-secondary) !important;
+}
+
+:root:not(.dark) .bg-cipher-darker {
+  background-color: var(--bg-primary) !important;
+}
+
+:root:not(.dark) .text-white {
+  color: var(--text-primary);
+}
+
+:root:not(.dark) .text-gray-400 {
+  color: var(--text-secondary);
+}
+
+:root:not(.dark) .border-gray-800 {
+  border-color: var(--border-color);
+}
+
+:root:not(.dark) .border-gray-700 {
+  border-color: var(--border-color);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Message bubble animations */
+.message-bubble {
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Typing indicator animation */
+.typing-dot {
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Online indicator pulse */
+.online-indicator {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6, #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Input focus styles */
+input:focus, textarea:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: var(--cipher-primary);
+}
+
+/* Button hover effects */
+.btn-primary {
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+/* Lock animation for encryption */
+.lock-icon {
+  transition: transform 0.3s ease;
+}
+
+.lock-icon:hover {
+  transform: scale(1.1);
+}

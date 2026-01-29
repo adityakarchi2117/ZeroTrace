@@ -1,14 +1,44 @@
 """
 CipherLink WebSocket Handler
-Real-time encrypted messaging with delivery receipts and presence
+Real-time encrypted messaging with delivery receipts, presence, and WebRTC signaling
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from typing import Dict, Set, Optional
 from datetime import datetime
 from app.core.security import decode_access_token
-from app.db.database import SessionLocal, Message, User
-from app.models.message import MessageStatus
+from app.db.database import SessionLocal, Message, User, MessageStatusEnum, MessageTypeEnum, ExpiryTypeEnum, CallLog, CallStatusEnum, CallTypeEnum
+
+async def save_call_log(call_data: dict, status: str, end_time: datetime = None):
+    try:
+        db = SessionLocal()
+        
+        start_time = call_data.get("start_time", datetime.utcnow())
+        if not end_time:
+            end_time = datetime.utcnow()
+            
+        duration = 0
+        if status == CallStatusEnum.COMPLETED and "start_time" in call_data:
+            duration = int((end_time - call_data["start_time"]).total_seconds())
+        
+        # Ensure status is an Enum
+        if isinstance(status, str):
+            status = CallStatusEnum(status)
+            
+        call_log = CallLog(
+            caller_id=call_data["caller_id"],
+            receiver_id=call_data["receiver_id"],
+            call_type=CallTypeEnum(call_data["call_type"]),
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+            duration_seconds=duration
+        )
+        db.add(call_log)
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"Error saving call log: {e}")
 import json
 import asyncio
 
@@ -17,23 +47,28 @@ router = APIRouter()
 
 class ConnectionManager:
     """
-    Manages WebSocket connections with presence tracking
+    Manages WebSocket connections with presence tracking and call signaling
     """
     
     def __init__(self):
         # user_id -> WebSocket connection
         self.active_connections: Dict[int, WebSocket] = {}
+        # username -> user_id mapping
+        self.username_to_id: Dict[str, int] = {}
         # user_id -> set of user_ids subscribed to their presence
         self.presence_subscribers: Dict[int, Set[int]] = {}
         # user_id -> last activity timestamp
         self.last_activity: Dict[int, datetime] = {}
         # user_id -> username mapping
         self.user_info: Dict[int, dict] = {}
+        # Active calls: call_id -> {caller_id, receiver_id, type}
+        self.active_calls: Dict[str, dict] = {}
     
     async def connect(self, user_id: int, username: str, websocket: WebSocket):
         """Accept connection and notify presence subscribers"""
         await websocket.accept()
         self.active_connections[user_id] = websocket
+        self.username_to_id[username] = user_id
         self.last_activity[user_id] = datetime.utcnow()
         self.user_info[user_id] = {"username": username}
         
@@ -42,16 +77,29 @@ class ConnectionManager:
         
         # Notify presence subscribers that user is online
         await self._broadcast_presence(user_id, is_online=True)
+        
+        # Deliver any pending messages
+        await self._deliver_pending_messages(user_id)
     
     def disconnect(self, user_id: int):
         """Handle disconnection and notify subscribers"""
+        username = self.user_info.get(user_id, {}).get("username")
+        if username and username in self.username_to_id:
+            del self.username_to_id[username]
+            
         if user_id in self.active_connections:
             del self.active_connections[user_id]
         if user_id in self.last_activity:
             del self.last_activity[user_id]
+        if user_id in self.user_info:
+            del self.user_info[user_id]
         
         # Schedule offline presence broadcast
         asyncio.create_task(self._broadcast_presence(user_id, is_online=False))
+    
+    def get_user_id_by_username(self, username: str) -> Optional[int]:
+        """Get user ID from username"""
+        return self.username_to_id.get(username)
     
     def is_online(self, user_id: int) -> bool:
         """Check if user is currently online"""
@@ -70,6 +118,13 @@ class ConnectionManager:
             except Exception as e:
                 print(f"Error sending to user {user_id}: {e}")
                 self.disconnect(user_id)
+        return False
+    
+    async def send_to_username(self, message: dict, username: str) -> bool:
+        """Send message to user by username"""
+        user_id = self.username_to_id.get(username)
+        if user_id:
+            return await self.send_personal_message(message, user_id)
         return False
     
     async def send_to_multiple(self, message: dict, user_ids: list) -> Dict[int, bool]:
@@ -101,9 +156,6 @@ class ConnectionManager:
     
     async def _broadcast_presence(self, user_id: int, is_online: bool):
         """Notify all subscribers about user's presence change"""
-        if user_id not in self.presence_subscribers:
-            return
-        
         presence_update = {
             "type": "presence",
             "user_id": user_id,
@@ -112,8 +164,10 @@ class ConnectionManager:
             "timestamp": datetime.utcnow().isoformat()
         }
         
-        for subscriber_id in self.presence_subscribers[user_id]:
-            await self.send_personal_message(presence_update, subscriber_id)
+        # Broadcast to all connected users (simplified for reliability)
+        for uid in self.active_connections:
+            if uid != user_id:
+                await self.send_personal_message(presence_update, uid)
     
     async def _update_last_seen(self, user_id: int):
         """Update user's last_seen in database"""
@@ -126,6 +180,51 @@ class ConnectionManager:
             db.close()
         except Exception as e:
             print(f"Error updating last_seen: {e}")
+    
+    async def _deliver_pending_messages(self, user_id: int):
+        """Deliver ALL unread messages that were sent while user was offline"""
+        try:
+            db = SessionLocal()
+            # Get ALL messages that haven't been delivered yet (sent OR undelivered)
+            pending = db.query(Message).filter(
+                Message.recipient_id == user_id,
+                Message.status.in_([MessageStatusEnum.SENT, 'undelivered']),
+                Message.delivered_at.is_(None)
+            ).order_by(Message.created_at).all()
+            
+            delivered_count = 0
+            for msg in pending:
+                sender = db.query(User).filter(User.id == msg.sender_id).first()
+                if sender:
+                    message_payload = {
+                        "type": "message",
+                        "message_id": msg.id,
+                        "sender_id": msg.sender_id,
+                        "sender_username": sender.username,
+                        "recipient_id": msg.recipient_id,
+                        "content": msg.encrypted_content,
+                        "encrypted_key": msg.encrypted_key,
+                        "message_type": msg.message_type,
+                        "expiry_type": msg.expiry_type,
+                        "expires_at": msg.expires_at.isoformat() if msg.expires_at else None,
+                        "timestamp": msg.created_at.isoformat() if msg.created_at else datetime.utcnow().isoformat()
+                    }
+                    delivered = await self.send_personal_message(message_payload, user_id)
+                    if delivered:
+                        msg.status = MessageStatusEnum.DELIVERED
+                        msg.delivered_at = datetime.utcnow()
+                        delivered_count += 1
+            
+            if delivered_count > 0:
+                print(f"✅ Delivered {delivered_count} pending messages to user {user_id}")
+            
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"❌ Error delivering pending messages: {e}")
+            if 'db' in locals():
+                db.rollback()
+                db.close()
 
 
 manager = ConnectionManager()
@@ -137,7 +236,7 @@ async def websocket_endpoint(
     token: str = Query(...)
 ):
     """
-    Main WebSocket endpoint for real-time messaging
+    Main WebSocket endpoint for real-time messaging and calls
     
     Message Types:
     - message: Send encrypted message
@@ -146,6 +245,11 @@ async def websocket_endpoint(
     - delivery_receipt: Confirm message delivery
     - presence_subscribe: Subscribe to user's presence
     - ping: Keep-alive ping
+    - call_offer: Initiate WebRTC call
+    - call_answer: Accept WebRTC call
+    - call_reject: Reject WebRTC call
+    - call_end: End WebRTC call
+    - ice_candidate: WebRTC ICE candidate
     """
     # Authenticate user
     payload = decode_access_token(token)
@@ -159,7 +263,7 @@ async def websocket_endpoint(
     await manager.connect(user_id, username, websocket)
     
     try:
-        # Send connection confirmation with online contacts
+        # Send connection confirmation
         await websocket.send_json({
             "type": "connected",
             "message": "Connected to CipherLink",
@@ -200,8 +304,10 @@ async def handle_websocket_message(user_id: int, username: str, raw_data: str):
         elif msg_type == "presence_subscribe":
             await handle_presence_subscribe(user_id, data)
         
+        elif msg_type == "presence":
+            await handle_presence_update(user_id, data)
+        
         elif msg_type == "ping":
-            # Respond to keep-alive ping
             await manager.send_personal_message(
                 {"type": "pong", "timestamp": datetime.utcnow().isoformat()},
                 user_id
@@ -209,6 +315,28 @@ async def handle_websocket_message(user_id: int, username: str, raw_data: str):
         
         elif msg_type == "get_online_status":
             await handle_online_status_request(user_id, data)
+        
+        # WebRTC Call Signaling
+        elif msg_type == "call_offer":
+            await handle_call_offer(user_id, username, data)
+        
+        elif msg_type == "call_answer":
+            await handle_call_answer(user_id, username, data)
+        
+        elif msg_type == "call_reject":
+            await handle_call_reject(user_id, username, data)
+        
+        elif msg_type == "call_end":
+            await handle_call_end(user_id, username, data)
+        
+        elif msg_type == "ice_candidate":
+            await handle_ice_candidate(user_id, username, data)
+        
+        elif msg_type == "delete_message":
+            await handle_delete_message(user_id, username, data)
+        
+        elif msg_type == "delete_conversation":
+            await handle_delete_conversation(user_id, username, data)
         
         else:
             await manager.send_personal_message(
@@ -234,17 +362,35 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
     Handle encrypted message routing
     Server only sees ciphertext - never decrypts
     """
-    recipient_id = data.get("recipient_id")
-    encrypted_content = data.get("content")
-    encrypted_key = data.get("encrypted_key")  # For hybrid encryption
-    message_id = data.get("message_id")  # Client-assigned ID for tracking
+    recipient_username = data.get("data", {}).get("recipient_username") or data.get("recipient_username")
+    encrypted_content = data.get("data", {}).get("encrypted_content") or data.get("content")
+    encrypted_key = data.get("data", {}).get("encrypted_key") or data.get("encrypted_key")
+    message_id = data.get("message_id")
     expiry_type = data.get("expiry_type", "none")
+    message_type = data.get("data", {}).get("message_type", "text") or data.get("message_type", "text")
+    file_metadata = data.get("data", {}).get("file_metadata") or data.get("file_metadata")
+    # Extract sender_theme for theme synchronization (unencrypted UI metadata)
+    sender_theme = data.get("data", {}).get("sender_theme") or data.get("sender_theme")
     timestamp = datetime.utcnow()
+    
+    # Look up recipient ID from username
+    db = SessionLocal()
+    recipient = db.query(User).filter(User.username == recipient_username).first()
+    if not recipient:
+        await manager.send_personal_message({
+            "type": "error",
+            "message": f"User not found: {recipient_username}"
+        }, sender_id)
+        db.close()
+        return
+    
+    recipient_id = recipient.id
+    db.close()
     
     # Store message in database (ciphertext only)
     db_message_id = await store_message(
         sender_id, recipient_id, encrypted_content, 
-        encrypted_key, expiry_type
+        encrypted_key, expiry_type, message_type, file_metadata
     )
     
     # Prepare message payload
@@ -254,9 +400,14 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
         "client_message_id": message_id,
         "sender_id": sender_id,
         "sender_username": sender_username,
+        "recipient_username": recipient_username,
         "content": encrypted_content,
+        "encrypted_content": encrypted_content,
         "encrypted_key": encrypted_key,
+        "message_type": message_type,
+        "file_metadata": file_metadata,
         "expiry_type": expiry_type,
+        "sender_theme": sender_theme,  # Include sender's theme for theme sync
         "timestamp": timestamp.isoformat()
     }
     
@@ -268,59 +419,71 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
         "type": "message_sent",
         "message_id": db_message_id,
         "client_message_id": message_id,
+        "recipient_username": recipient_username,
         "status": "delivered" if delivered else "sent",
         "timestamp": timestamp.isoformat()
     }, sender_id)
     
     # Update message status if delivered
     if delivered:
-        await update_message_status(db_message_id, MessageStatus.DELIVERED)
+        await update_message_status(db_message_id, MessageStatusEnum.DELIVERED)
 
 
 async def handle_typing_indicator(sender_id: int, sender_username: str, data: dict):
     """Send typing indicator to recipient"""
-    recipient_id = data.get("recipient_id")
-    is_typing = data.get("is_typing", True)
+    recipient_username = data.get("data", {}).get("recipient_username") or data.get("recipient_username")
+    is_typing = data.get("data", {}).get("is_typing", True) if data.get("data") else data.get("is_typing", True)
     
-    await manager.send_personal_message({
-        "type": "typing",
-        "sender_id": sender_id,
-        "sender_username": sender_username,
-        "is_typing": is_typing,
-        "timestamp": datetime.utcnow().isoformat()
-    }, recipient_id)
+    # Look up recipient
+    recipient_id = manager.get_user_id_by_username(recipient_username)
+    if recipient_id:
+        await manager.send_personal_message({
+            "type": "typing",
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+            "is_typing": is_typing,
+            "timestamp": datetime.utcnow().isoformat()
+        }, recipient_id)
 
 
 async def handle_read_receipt(user_id: int, data: dict):
     """Handle read receipt - notify sender that message was read"""
-    message_id = data.get("message_id")
-    sender_id = data.get("sender_id")
+    message_id = data.get("message_id") or data.get("data", {}).get("message_id")
+    sender_id = data.get("sender_id") or data.get("data", {}).get("sender_id")
     
     # Update message status in database
-    await update_message_status(message_id, MessageStatus.READ)
+    await update_message_status(message_id, MessageStatusEnum.READ)
     
     # Notify sender
-    await manager.send_personal_message({
-        "type": "read_receipt",
-        "message_id": message_id,
-        "reader_id": user_id,
-        "timestamp": datetime.utcnow().isoformat()
-    }, sender_id)
+    if sender_id:
+        await manager.send_personal_message({
+            "type": "read_receipt",
+            "message_id": message_id,
+            "reader_id": user_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }, sender_id)
 
 
 async def handle_delivery_receipt(user_id: int, data: dict):
     """Confirm message was received by client"""
-    message_id = data.get("message_id")
-    sender_id = data.get("sender_id")
+    message_id = data.get("message_id") or data.get("data", {}).get("message_id")
+    sender_id = data.get("sender_id") or data.get("data", {}).get("sender_id")
     
-    await update_message_status(message_id, MessageStatus.DELIVERED)
+    await update_message_status(message_id, MessageStatusEnum.DELIVERED)
     
-    await manager.send_personal_message({
-        "type": "delivery_receipt",
-        "message_id": message_id,
-        "delivered_to": user_id,
-        "timestamp": datetime.utcnow().isoformat()
-    }, sender_id)
+    if sender_id:
+        await manager.send_personal_message({
+            "type": "delivery_receipt",
+            "message_id": message_id,
+            "delivered_to": user_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }, sender_id)
+
+
+async def handle_presence_update(user_id: int, data: dict):
+    """Handle explicit presence updates"""
+    is_online = data.get("data", {}).get("is_online", True)
+    await manager._broadcast_presence(user_id, is_online)
 
 
 async def handle_presence_subscribe(user_id: int, data: dict):
@@ -357,6 +520,242 @@ async def handle_online_status_request(user_id: int, data: dict):
     }, user_id)
 
 
+# ============ WebRTC Call Signaling ============
+
+async def handle_call_offer(caller_id: int, caller_username: str, data: dict):
+    """Handle WebRTC call offer (audio/video)"""
+    recipient_username = data.get("data", {}).get("recipient_username") or data.get("recipient_username")
+    call_type = data.get("data", {}).get("call_type", "audio") or data.get("call_type", "audio")
+    sdp_offer = data.get("data", {}).get("sdp") or data.get("sdp")
+    call_id = data.get("data", {}).get("call_id") or data.get("call_id") or f"{caller_id}-{datetime.utcnow().timestamp()}"
+    
+    recipient_id = manager.get_user_id_by_username(recipient_username)
+    
+    if not recipient_id:
+        # User is offline
+        await manager.send_personal_message({
+            "type": "call_failed",
+            "call_id": call_id,
+            "reason": "User is offline",
+            "recipient_username": recipient_username,
+            "timestamp": datetime.utcnow().isoformat()
+        }, caller_id)
+        return
+    
+    # Store active call
+    manager.active_calls[call_id] = {
+        "caller_id": caller_id,
+        "caller_username": caller_username,
+        "receiver_id": recipient_id,
+        "receiver_username": recipient_username,
+        "call_type": call_type,
+        "status": "ringing"
+    }
+    
+    print(f"📞 Forwarding call offer from {caller_username} to {recipient_username} (id: {recipient_id})")
+    
+    # Forward offer to recipient
+    call_message = {
+        "type": "call_offer",
+        "call_id": call_id,
+        "caller_id": caller_id,
+        "caller_username": caller_username,
+        "call_type": call_type,
+        "sdp": sdp_offer,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    sent = await manager.send_personal_message(call_message, recipient_id)
+    print(f"📞 Call offer sent to {recipient_username}: {sent}")
+
+
+async def handle_call_answer(user_id: int, username: str, data: dict):
+    """Handle WebRTC call answer"""
+    print(f"📞 handle_call_answer called by {username}, data: {data}")
+    
+    call_id = data.get("data", {}).get("call_id") or data.get("call_id")
+    sdp_answer = data.get("data", {}).get("sdp") or data.get("sdp")
+    
+    print(f"📞 Call ID: {call_id}, SDP present: {sdp_answer is not None}")
+    
+    call = manager.active_calls.get(call_id)
+    if not call:
+        print(f"❌ Call not found in active_calls: {call_id}")
+        print(f"📞 Active calls: {list(manager.active_calls.keys())}")
+        return
+    
+    call["status"] = "connected"
+    call["start_time"] = datetime.utcnow()
+    
+    # Forward answer to caller
+    print(f"📞 Forwarding answer to caller ID: {call['caller_id']}")
+    sent = await manager.send_personal_message({
+        "type": "call_answer",
+        "call_id": call_id,
+        "answerer_username": username,
+        "sdp": sdp_answer,
+        "timestamp": datetime.utcnow().isoformat()
+    }, call["caller_id"])
+    print(f"📞 Answer forwarded successfully: {sent}")
+
+
+async def handle_call_reject(user_id: int, username: str, data: dict):
+    """Handle WebRTC call rejection"""
+    call_id = data.get("data", {}).get("call_id") or data.get("call_id")
+    reason = data.get("data", {}).get("reason", "rejected") or data.get("reason", "rejected")
+    
+    call = manager.active_calls.get(call_id)
+    if not call:
+        return
+    
+    # Remove call
+    del manager.active_calls[call_id]
+    
+    # Save call log
+    await save_call_log(call, CallStatusEnum.REJECTED)
+    
+    # Notify caller
+    await manager.send_personal_message({
+        "type": "call_rejected",
+        "call_id": call_id,
+        "rejected_by": username,
+        "reason": reason,
+        "timestamp": datetime.utcnow().isoformat()
+    }, call["caller_id"])
+
+
+async def handle_call_end(user_id: int, username: str, data: dict):
+    """Handle WebRTC call end"""
+    call_id = data.get("data", {}).get("call_id") or data.get("call_id")
+    
+    call = manager.active_calls.get(call_id)
+    if not call:
+        return
+    
+    # Remove call
+    del manager.active_calls[call_id]
+    
+    # Determine status
+    status = CallStatusEnum.COMPLETED if call.get("status") == "connected" else CallStatusEnum.MISSED
+    if call.get("status") != "connected" and user_id == call["receiver_id"]:
+        # If receiver ended it without answering, it's rejected really, but let's stick to simple logic or REJECTED
+        # Actually standard flow: if receiver hangs up ringing call -> REJECTED usually handled by reject
+        pass
+
+    await save_call_log(call, status)
+    
+    # Notify both parties
+    other_user_id = call["caller_id"] if user_id == call["receiver_id"] else call["receiver_id"]
+    await manager.send_personal_message({
+        "type": "call_ended",
+        "call_id": call_id,
+        "ended_by": username,
+        "timestamp": datetime.utcnow().isoformat()
+    }, other_user_id)
+
+
+async def handle_ice_candidate(user_id: int, username: str, data: dict):
+    """Handle WebRTC ICE candidate exchange"""
+    print(f"🧊 ICE candidate received from {username}")
+    
+    call_id = data.get("data", {}).get("call_id") or data.get("call_id")
+    candidate = data.get("data", {}).get("candidate") or data.get("candidate")
+    
+    call = manager.active_calls.get(call_id)
+    if not call:
+        print(f"❌ Call not found for ICE candidate: {call_id}")
+        return
+    
+    # Forward to other party
+    other_user_id = call["caller_id"] if user_id == call["receiver_id"] else call["receiver_id"]
+    print(f"🧊 Forwarding ICE candidate to user ID: {other_user_id}")
+    
+    await manager.send_personal_message({
+        "type": "ice_candidate",
+        "call_id": call_id,
+        "from_username": username,
+        "candidate": candidate,
+        "timestamp": datetime.utcnow().isoformat()
+    }, other_user_id)
+
+
+# ============ Message/Conversation Deletion ============
+
+async def handle_delete_message(sender_id: int, sender_username: str, data: dict):
+    """Handle delete message request - forwards deletion event to recipient"""
+    recipient_username = data.get("data", {}).get("recipient_username") or data.get("recipient_username")
+    message_id = data.get("data", {}).get("message_id") or data.get("message_id")
+    
+    if not recipient_username or not message_id:
+        await manager.send_personal_message({
+            "type": "error",
+            "message": "Missing recipient_username or message_id"
+        }, sender_id)
+        return
+    
+    # Look up recipient ID
+    recipient_id = manager.get_user_id_by_username(recipient_username)
+    
+    if recipient_id:
+        # Forward deletion event to recipient
+        await manager.send_personal_message({
+            "type": "delete_message_received",
+            "message_id": message_id,
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+            "timestamp": datetime.utcnow().isoformat()
+        }, recipient_id)
+        print(f"🗑️ Delete message event forwarded to {recipient_username}")
+    else:
+        # User is offline - the deletion will be handled when they fetch messages
+        print(f"🗑️ Delete message: recipient {recipient_username} is offline")
+    
+    # Send confirmation to sender
+    await manager.send_personal_message({
+        "type": "delete_message_sent",
+        "message_id": message_id,
+        "recipient_username": recipient_username,
+        "status": "forwarded" if recipient_id else "queued",
+        "timestamp": datetime.utcnow().isoformat()
+    }, sender_id)
+
+
+async def handle_delete_conversation(sender_id: int, sender_username: str, data: dict):
+    """Handle delete conversation request - forwards deletion event to recipient"""
+    recipient_username = data.get("data", {}).get("recipient_username") or data.get("recipient_username")
+    
+    if not recipient_username:
+        await manager.send_personal_message({
+            "type": "error",
+            "message": "Missing recipient_username"
+        }, sender_id)
+        return
+    
+    # Look up recipient ID
+    recipient_id = manager.get_user_id_by_username(recipient_username)
+    
+    if recipient_id:
+        # Forward deletion event to recipient
+        await manager.send_personal_message({
+            "type": "delete_conversation_received",
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+            "timestamp": datetime.utcnow().isoformat()
+        }, recipient_id)
+        print(f"🗑️ Delete conversation event forwarded to {recipient_username}")
+    else:
+        # User is offline - the deletion will be handled when they fetch messages
+        print(f"🗑️ Delete conversation: recipient {recipient_username} is offline")
+    
+    # Send confirmation to sender
+    await manager.send_personal_message({
+        "type": "delete_conversation_sent",
+        "recipient_username": recipient_username,
+        "status": "forwarded" if recipient_id else "queued",
+        "timestamp": datetime.utcnow().isoformat()
+    }, sender_id)
+
+
 # ============ Database Operations ============
 
 async def store_message(
@@ -364,7 +763,9 @@ async def store_message(
     recipient_id: int, 
     encrypted_content: str,
     encrypted_key: str = None,
-    expiry_type: str = "none"
+    expiry_type: str = "none",
+    message_type: str = "text",
+    file_metadata: dict = None
 ) -> int:
     """Store encrypted message in database"""
     try:
@@ -383,13 +784,29 @@ async def store_message(
             if expiry_type in expiry_deltas:
                 expires_at = datetime.utcnow() + expiry_deltas[expiry_type]
         
+        # Convert message_type string to enum
+        msg_type_enum = MessageTypeEnum.TEXT
+        for mt in MessageTypeEnum:
+            if mt.value == message_type:
+                msg_type_enum = mt
+                break
+        
+        # Convert expiry_type string to enum
+        exp_type_enum = ExpiryTypeEnum.NONE
+        for et in ExpiryTypeEnum:
+            if et.value == expiry_type:
+                exp_type_enum = et
+                break
+        
         message = Message(
             sender_id=sender_id,
             recipient_id=recipient_id,
             encrypted_content=encrypted_content,
             encrypted_key=encrypted_key,
-            expiry_type=expiry_type,
-            expires_at=expires_at
+            message_type=msg_type_enum,
+            expiry_type=exp_type_enum,
+            expires_at=expires_at,
+            file_metadata=file_metadata
         )
         db.add(message)
         db.commit()
@@ -402,16 +819,16 @@ async def store_message(
         return -1
 
 
-async def update_message_status(message_id: int, status: MessageStatus):
+async def update_message_status(message_id: int, status: MessageStatusEnum):
     """Update message status in database"""
     try:
         db = SessionLocal()
         message = db.query(Message).filter(Message.id == message_id).first()
         if message:
             message.status = status
-            if status == MessageStatus.DELIVERED:
+            if status == MessageStatusEnum.DELIVERED:
                 message.delivered_at = datetime.utcnow()
-            elif status == MessageStatus.READ:
+            elif status == MessageStatusEnum.READ:
                 message.read_at = datetime.utcnow()
             db.commit()
         db.close()

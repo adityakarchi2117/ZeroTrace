@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "CipherLink"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"
     
     # ============ API Settings ============
     API_V1_STR: str = "/api/v1"
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # ============ Database ============
-    DATABASE_URL: str = "sqlite:///./cipherlink.db"
+    DATABASE_URL: str = "sqlite:///./cipherlink_v3.db"
     
     # ============ CORS ============
     ALLOWED_ORIGINS: List[str] = [
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ]
+    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1", "*"]
     
     # ============ WebSocket ============
     WS_MESSAGE_QUEUE_SIZE: int = 100

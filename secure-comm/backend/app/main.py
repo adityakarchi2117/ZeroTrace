@@ -1,25 +1,43 @@
 """
-CipherLink API - Private by design. Secure by default.
+🔐 CipherLink API - Private by design. Secure by default.
 End-to-end encrypted communication platform
+
+Features:
+- Zero-knowledge server architecture
+- Signal Protocol-inspired E2E encryption
+- Real-time messaging with WebSockets
+- Perfect Forward Secrecy
+- Secure vault for encrypted storage
+- Multi-device support
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import asyncio
+import logging
+from datetime import datetime
 
 from app.api.routes import auth, keys, messages
 from app.api.routes.vault import router as vault_router
+from app.api.routes.contacts import router as contacts_router
 from app.api.websocket import router as websocket_router
 from app.core.config import settings
 from app.db.database import engine, Base
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # Background task for ephemeral message cleanup
 async def cleanup_expired_messages():
     """Periodically delete expired ephemeral messages"""
     from app.db.database import SessionLocal, Message
-    from datetime import datetime
     
     while True:
         try:
@@ -31,40 +49,66 @@ async def cleanup_expired_messages():
             ).delete()
             
             if expired > 0:
-                print(f"Cleaned up {expired} expired messages")
+                logger.info(f"🧹 Cleaned up {expired} expired messages")
             
             db.commit()
             db.close()
         except Exception as e:
-            print(f"Error in message cleanup: {e}")
+            logger.error(f"❌ Error in message cleanup: {e}")
         
         # Run every minute
         await asyncio.sleep(60)
 
+# Background task for key rotation
+async def rotate_signed_prekeys():
+    """Rotate signed prekeys weekly for enhanced security"""
+    from app.db.database import SessionLocal, User
+    from datetime import timedelta
+    
+    while True:
+        try:
+            db = SessionLocal()
+            # Find users with old signed prekeys (older than 7 days)
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            users_needing_rotation = db.query(User).filter(
+                User.signed_prekey_timestamp < week_ago
+            ).all()
+            
+            if users_needing_rotation:
+                logger.info(f"🔄 {len(users_needing_rotation)} users need key rotation")
+                # Note: Actual rotation happens client-side, this just logs
+            
+            db.close()
+        except Exception as e:
+            logger.error(f"❌ Error in key rotation check: {e}")
+        
+        # Run daily
+        await asyncio.sleep(86400)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle events"""
     # Startup
-    print("🚀 Starting CipherLink API...")
+    logger.info("🚀 Starting CipherLink API...")
+    logger.info(f"🔧 Environment: {settings.ENVIRONMENT}")
+    logger.info(f"🗄️  Database: {settings.DATABASE_URL.split('://')[0]}")
     
     # Create database tables
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created")
+    logger.info("📊 Database tables created/verified")
     
     # Start background tasks
     cleanup_task = asyncio.create_task(cleanup_expired_messages())
-    print("✅ Background cleanup task started")
+    rotation_task = asyncio.create_task(rotate_signed_prekeys())
+    logger.info("⚙️  Background tasks started")
     
     yield
     
     # Shutdown
-    print("🛑 Shutting down CipherLink API...")
+    logger.info("🛑 Shutting down CipherLink API...")
     cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
+    rotation_task.cancel()
+    logger.info("✅ Shutdown complete")
 
 
 app = FastAPI(
@@ -108,10 +152,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security middleware
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=settings.ALLOWED_HOSTS
+)
+
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(keys.router, prefix="/api/keys", tags=["Key Management"])
 app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
+app.include_router(contacts_router, prefix="/api/contacts", tags=["Contacts"])
 app.include_router(vault_router, prefix="/api/vault", tags=["Secure Vault"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
 
@@ -165,3 +216,13 @@ async def security_info():
             "Vault contents"
         ]
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.ENVIRONMENT == "development",
+        log_level="info"
+    )

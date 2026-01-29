@@ -24,7 +24,8 @@ class MessageRepository:
         message_type: str = "text",
         expiry_type: str = "none",
         expires_at: datetime = None,
-        reply_to_id: int = None
+        reply_to_id: int = None,
+        file_metadata: dict = None
     ) -> Message:
         """Create a new encrypted message."""
         message = Message(
@@ -36,6 +37,7 @@ class MessageRepository:
             expiry_type=expiry_type,
             expires_at=expires_at,
             reply_to_id=reply_to_id,
+            file_metadata=file_metadata,
             status=MessageStatusEnum.SENT
         )
         self.db.add(message)
@@ -137,6 +139,26 @@ class MessageRepository:
             self.db.commit()
         
         return count
+    
+    def get_conversation_paginated(
+        self, 
+        user1_id: int, 
+        user2_id: int,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Message]:
+        """Get paginated messages between two users."""
+        messages = self.db.query(Message).filter(
+            or_(
+                and_(Message.sender_id == user1_id, Message.recipient_id == user2_id),
+                and_(Message.sender_id == user2_id, Message.recipient_id == user1_id)
+            ),
+            Message.status != MessageStatusEnum.DELETED,
+            Message.status != MessageStatusEnum.EXPIRED
+        ).order_by(Message.created_at.desc()).offset(offset).limit(limit).all()
+        
+        # Reverse to chronological order
+        return list(reversed(messages))
     
     def get_conversation_list(self, user_id: int) -> List[dict]:
         """Get list of conversations with last message preview."""

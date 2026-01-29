@@ -86,10 +86,42 @@ class User(Base):
     received_messages = relationship("Message", foreign_keys="Message.recipient_id", back_populates="recipient")
     vault_items = relationship("VaultItem", back_populates="user", cascade="all, delete-orphan")
     contacts = relationship("Contact", foreign_keys="Contact.user_id", back_populates="user")
+    initiated_calls = relationship("CallLog", foreign_keys="CallLog.caller_id", back_populates="caller")
+    received_calls = relationship("CallLog", foreign_keys="CallLog.receiver_id", back_populates="receiver")
     
     __table_args__ = (
         Index('ix_users_identity_key', 'identity_key'),
     )
+
+
+class CallTypeEnum(str, enum.Enum):
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class CallStatusEnum(str, enum.Enum):
+    COMPLETED = "completed"
+    MISSED = "missed"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class CallLog(Base):
+    __tablename__ = "call_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    caller_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    call_type = Column(Enum(CallTypeEnum), default=CallTypeEnum.AUDIO)
+    status = Column(Enum(CallStatusEnum), default=CallStatusEnum.COMPLETED)
+    
+    start_time = Column(DateTime, default=datetime.utcnow)
+    end_time = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, default=0)
+    
+    caller = relationship("User", foreign_keys=[caller_id], back_populates="initiated_calls")
+    receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_calls")
 
 
 class Device(Base):
@@ -163,6 +195,7 @@ class Message(Base):
     
     # For file messages
     file_id = Column(String(100), nullable=True)
+    file_metadata = Column(JSON, nullable=True)
     
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_messages")

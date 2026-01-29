@@ -44,6 +44,8 @@ class MessageCreate(MessageBase):
     file_metadata: Optional[dict] = Field(None, description="Encrypted file metadata")
     # Reply reference
     reply_to_id: Optional[int] = None
+    # Sender's theme for theme synchronization (unencrypted UI metadata)
+    sender_theme: Optional[dict] = Field(None, description="Sender's theme preferences for theme sync")
 
 
 class MessageResponse(BaseModel):
@@ -58,6 +60,7 @@ class MessageResponse(BaseModel):
     status: MessageStatus
     expiry_type: ExpiryType
     expires_at: Optional[datetime] = None
+    file_metadata: Optional[dict] = None
     reply_to_id: Optional[int] = None
     created_at: datetime
     delivered_at: Optional[datetime] = None
@@ -121,3 +124,18 @@ class ConversationPreview(BaseModel):
 
 class ConversationList(BaseModel):
     conversations: List[ConversationPreview]
+
+
+class CallLogResponse(BaseModel):
+    id: int
+    caller_id: int
+    caller_username: str
+    receiver_id: int
+    receiver_username: str
+    call_type: str
+    status: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    duration_seconds: int = 0
+    
+    model_config = ConfigDict(from_attributes=True)
