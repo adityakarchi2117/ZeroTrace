@@ -165,14 +165,24 @@ app = FastAPI(
 )
 
 # CORS middleware - MUST be first
+# For development: allow all origins (with credentials workaround)
+# For production: use configured origins only
+if settings.ENVIRONMENT == "production":
+    _cors_origins = settings.ALLOWED_ORIGINS
+    _allow_credentials = True
+else:
+    # Development mode - more permissive
+    _cors_origins = ["*"]
+    _allow_credentials = False  # Can't use credentials with "*"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=600,  # Cache preflight for 10 minutes
+    max_age=600,
 )
 
 # Debug configuration
