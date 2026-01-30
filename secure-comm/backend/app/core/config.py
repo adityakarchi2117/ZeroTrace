@@ -1,9 +1,9 @@
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, computed_field
 from typing import List
 from functools import lru_cache
 import json
-import os
 
 
 def parse_env_list(env_value: str, default: List[str]) -> List[str]:
@@ -44,14 +44,10 @@ class Settings(BaseSettings):
     # ============ Database ============
     DATABASE_URL: str = "sqlite:///./cipherlink_v3.db"
     
-    # ============ CORS ============
-    # Use string for env compatibility, parsed in model_post_init
-    ALLOWED_ORIGINS_STR: str = ""
-    ALLOWED_HOSTS_STR: str = ""
-    
-    # Runtime computed fields
-    ALLOWED_ORIGINS: List[str] = []
-    ALLOWED_HOSTS: List[str] = []
+    # ============ CORS - Env vars for configuration ============
+    CORS_ORIGINS: str = Field(default="", description="Comma-separated or JSON list of allowed origins")
+    CORS_HOSTS: str = Field(default="", description="Comma-separated or JSON list of allowed hosts")
+    FILE_TYPES: str = Field(default="", description="Comma-separated or JSON list of allowed file types")
     
     # ============ WebSocket ============
     WS_MESSAGE_QUEUE_SIZE: int = 100
@@ -76,32 +72,39 @@ class Settings(BaseSettings):
     MAX_VAULT_ITEM_SIZE: int = 1048576  # 1MB per item
     
     # ============ File Upload ============
-    ALLOWED_FILE_TYPES_STR: str = ""
-    ALLOWED_FILE_TYPES: List[str] = []
     MAX_FILE_SIZE: int = 52428800  # 50MB
     
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
-        extra="ignore"
+        extra="ignore",
+        populate_by_name=True,
     )
     
-    def model_post_init(self, __context):
-        # Parse ALLOWED_ORIGINS
-        default_origins = [
+    @computed_field
+    @property
+    def ALLOWED_ORIGINS(self) -> List[str]:
+        """Get allowed origins from CORS_ORIGINS env var or defaults"""
+        defaults = [
             "http://localhost:3000",
             "http://localhost:5173",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
         ]
-        self.ALLOWED_ORIGINS = parse_env_list(self.ALLOWED_ORIGINS_STR, default_origins)
-        
-        # Parse ALLOWED_HOSTS
-        default_hosts = ["localhost", "127.0.0.1", "*"]
-        self.ALLOWED_HOSTS = parse_env_list(self.ALLOWED_HOSTS_STR, default_hosts)
-        
-        # Parse ALLOWED_FILE_TYPES
-        default_types = [
+        return parse_env_list(self.CORS_ORIGINS, defaults)
+    
+    @computed_field
+    @property
+    def ALLOWED_HOSTS(self) -> List[str]:
+        """Get allowed hosts from CORS_HOSTS env var or defaults"""
+        defaults = ["localhost", "127.0.0.1", "*"]
+        return parse_env_list(self.CORS_HOSTS, defaults)
+    
+    @computed_field
+    @property
+    def ALLOWED_FILE_TYPES(self) -> List[str]:
+        """Get allowed file types from FILE_TYPES env var or defaults"""
+        defaults = [
             "image/jpeg",
             "image/png",
             "image/gif",
@@ -110,7 +113,7 @@ class Settings(BaseSettings):
             "text/plain",
             "application/zip",
         ]
-        self.ALLOWED_FILE_TYPES = parse_env_list(self.ALLOWED_FILE_TYPES_STR, default_types)
+        return parse_env_list(self.FILE_TYPES, defaults)
 
 
 @lru_cache()
