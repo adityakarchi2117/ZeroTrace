@@ -152,10 +152,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Debug configuration
+logger.info(f"📋 ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}")
+logger.info(f"📋 ALLOWED_ORIGINS: {settings.ALLOWED_ORIGINS}")
+
 # Security middleware
 app.add_middleware(
     TrustedHostMiddleware, 
-    allowed_hosts=settings.ALLOWED_HOSTS
+    allowed_hosts=["*"] # Force allow all for debugging
 )
 
 # Include routers

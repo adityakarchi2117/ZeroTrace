@@ -3,6 +3,9 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance } from '@/lib/useAppearance';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MotionAvatar, TiltCard } from '@/components/motion';
+import { motionVariants } from '@/lib/motion/config';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
   Shield, User as UserIcon, Loader2, UserPlus, X
@@ -124,62 +127,72 @@ export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-gray-800">
+      <motion.div 
+        className="p-4 border-b border-gray-800"
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.4 }}
+      >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <div 
+            <motion.div 
               className="w-8 h-8 rounded-lg flex items-center justify-center"
               style={{ background: accentGradient }}
+              whileHover={{ scale: 1.1, rotate: 5 }}
+              whileTap={{ scale: 0.95 }}
             >
               <Lock className="w-4 h-4 text-white" />
-            </div>
+            </motion.div>
             <span className="font-bold text-white dark:text-white">CipherLink</span>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <motion.button
               onClick={onNewChat}
               className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
               title="New Chat"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
             >
               <Plus className="w-5 h-5" />
-            </button>
-            <button
+            </motion.button>
+            <motion.button
               onClick={onSettings}
               className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
               title="Settings"
+              whileHover={{ scale: 1.1, rotate: 30 }}
+              whileTap={{ scale: 0.9 }}
             >
               <Settings className="w-5 h-5" />
-            </button>
+            </motion.button>
           </div>
         </div>
 
-        {/* User Info */}
+        {/* User Info with Tilt Avatar */}
         <div className="flex items-center gap-3 p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg">
-          <div className="relative">
-            <div 
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ background: accentGradient }}
-            >
-              <UserIcon className="w-5 h-5 text-white" />
-            </div>
-            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-cipher-dark" />
-          </div>
+          <MotionAvatar name={user?.username || 'U'} size="md" disableTilt />
           <div className="flex-1 min-w-0">
             <p className="font-medium text-white truncate">{user?.username}</p>
             <p className="text-xs text-gray-500 truncate">{user?.email}</p>
           </div>
-          <button
+          <motion.button
             onClick={logout}
             className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
             title="Logout"
+            whileHover={{ scale: 1.1, x: 2 }}
+            whileTap={{ scale: 0.9 }}
           >
             <LogOut className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Search */}
-      <div className="p-4">
+      <motion.div 
+        className="p-4"
+        initial={{ y: -10, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.1 }}
+      >
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
           <input
@@ -190,12 +203,14 @@ export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
             className="w-full bg-cipher-darker border border-gray-700 rounded-lg py-2 pl-10 pr-10 text-sm text-white placeholder-gray-500 focus:border-cipher-primary transition-colors"
           />
           {searchQuery && (
-            <button
+            <motion.button
               onClick={clearSearch}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+              whileHover={{ scale: 1.2, rotate: 90 }}
+              whileTap={{ scale: 0.9 }}
             >
               <X className="w-4 h-4" />
-            </button>
+            </motion.button>
           )}
           {isSearching && (
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cipher-primary animate-spin" />
@@ -203,99 +218,134 @@ export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
         </div>
 
         {/* Global Search Results */}
-        {showGlobalSearch && searchResults.length > 0 && (
-          <div className="mt-2 bg-cipher-darker border border-gray-700 rounded-lg overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-700 bg-gray-800/50">
-              <p className="text-xs text-gray-400 font-medium">Users Found</p>
-            </div>
-            <div className="max-h-48 overflow-y-auto">
-              {searchResults.map((result) => {
-                const existingConv = conversations.find(c => c.username === result.username);
-                const isAdding = addingUser === result.id;
-                
-                return (
-                  <button
-                    key={result.id}
-                    onClick={() => handleStartChat(result)}
-                    disabled={isAdding}
-                    className="w-full p-3 flex items-center gap-3 hover:bg-gray-800 transition-colors border-b border-gray-700/50 last:border-0"
-                  >
-                    <div className="relative">
-                      <div 
-                        className="w-10 h-10 rounded-full flex items-center justify-center"
-                        style={{ background: accentGradient }}
-                      >
-                        <span className="text-white font-medium text-sm">
-                          {result.username[0].toUpperCase()}
-                        </span>
+        <AnimatePresence>
+          {showGlobalSearch && searchResults.length > 0 && (
+            <motion.div 
+              className="mt-2 bg-cipher-darker border border-gray-700 rounded-lg overflow-hidden"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+            >
+              <div className="px-3 py-2 border-b border-gray-700 bg-gray-800/50">
+                <p className="text-xs text-gray-400 font-medium">Users Found</p>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {searchResults.map((result, index) => {
+                  const existingConv = conversations.find(c => c.username === result.username);
+                  const isAdding = addingUser === result.id;
+                  
+                  return (
+                    <motion.button
+                      key={result.id}
+                      onClick={() => handleStartChat(result)}
+                      disabled={isAdding}
+                      className="w-full p-3 flex items-center gap-3 hover:bg-gray-800 transition-colors border-b border-gray-700/50 last:border-0"
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      transition={{ delay: index * 0.05 }}
+                      whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                    >
+                      <div className="relative">
+                        <div 
+                          className="w-10 h-10 rounded-full flex items-center justify-center"
+                          style={{ background: accentGradient }}
+                        >
+                          <span className="text-white font-medium text-sm">
+                            {result.username[0].toUpperCase()}
+                          </span>
+                        </div>
+                        {result.is_online && (
+                          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-cipher-darker" />
+                        )}
                       </div>
-                      {result.is_online && (
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-cipher-darker" />
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-white font-medium truncate text-sm">{result.username}</p>
+                        <p className="text-xs text-gray-500">
+                          {existingConv ? 'Open chat' : 'Start new chat'}
+                        </p>
+                      </div>
+                      {isAdding ? (
+                        <Loader2 className="w-5 h-5 text-cipher-primary animate-spin" />
+                      ) : existingConv ? (
+                        <MessageSquare className="w-5 h-5 text-cipher-primary" />
+                      ) : (
+                        <UserPlus className="w-5 h-5 text-green-500" />
                       )}
-                    </div>
-                    <div className="flex-1 text-left min-w-0">
-                      <p className="text-white font-medium truncate text-sm">{result.username}</p>
-                      <p className="text-xs text-gray-500">
-                        {existingConv ? 'Open chat' : 'Start new chat'}
-                      </p>
-                    </div>
-                    {isAdding ? (
-                      <Loader2 className="w-5 h-5 text-cipher-primary animate-spin" />
-                    ) : existingConv ? (
-                      <MessageSquare className="w-5 h-5 text-cipher-primary" />
-                    ) : (
-                      <UserPlus className="w-5 h-5 text-green-500" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* No results message */}
-        {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
-          <div className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center">
-            <p className="text-sm text-gray-400">No users found for "{searchQuery}"</p>
-            <button
-              onClick={onNewChat}
-              className="mt-2 text-xs text-cipher-primary hover:underline"
+        <AnimatePresence>
+          {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
+            <motion.div 
+              className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
             >
-              Try advanced search
-            </button>
-          </div>
-        )}
-      </div>
+              <p className="text-sm text-gray-400">No users found for &quot;{searchQuery}&quot;</p>
+              <button
+                onClick={onNewChat}
+                className="mt-2 text-xs text-cipher-primary hover:underline"
+              >
+                Try advanced search
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
-      {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Conversations List with Stagger Animation */}
+      <motion.div 
+        className="flex-1 overflow-y-auto"
+        variants={motionVariants.stagger}
+        initial="hidden"
+        animate="visible"
+      >
         {filteredConversations.length === 0 && conversations.length === 0 ? (
-          <div className="p-8 text-center">
+          <motion.div 
+            className="p-8 text-center"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+          >
             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <MessageSquare className="w-8 h-8 text-gray-600" />
             </div>
             <p className="text-gray-400 text-sm">No conversations yet</p>
-            <button
+            <motion.button
               onClick={onNewChat}
               className="mt-3 text-cipher-primary hover:text-cipher-secondary text-sm font-medium"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
               Start a new chat
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         ) : filteredConversations.length === 0 && searchQuery ? (
           <div className="p-4 text-center">
-            <p className="text-gray-400 text-sm">No conversations match "{searchQuery}"</p>
+            <p className="text-gray-400 text-sm">No conversations match &quot;{searchQuery}&quot;</p>
           </div>
         ) : (
           <div className="space-y-1 p-2">
-            {filteredConversations.map((conv) => {
+            {filteredConversations.map((conv, index) => {
               const isActive = currentConversation === conv.username;
               const isOnline = onlineUsers.has(conv.user_id);
               
               return (
-                <button
+                <motion.button
                   key={conv.user_id}
                   onClick={() => setCurrentConversation(conv.username)}
+                  variants={motionVariants.listItem}
+                  whileHover={{ 
+                    x: 4,
+                    backgroundColor: isActive ? undefined : 'rgba(255,255,255,0.05)',
+                  }}
+                  whileTap={{ scale: 0.98 }}
                   className={`
                     w-full p-3 rounded-lg flex items-center gap-3 transition-colors
                     ${isActive 
@@ -334,26 +384,36 @@ export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
                         </span>
                       </div>
                       {conv.unread_count > 0 && (
-                        <span className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                        <motion.span 
+                          className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2"
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+                        >
                           {conv.unread_count}
-                        </span>
+                        </motion.span>
                       )}
                     </div>
                   </div>
-                </button>
+                </motion.button>
               );
             })}
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-800">
+      <motion.div 
+        className="p-4 border-t border-gray-800"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+      >
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <Lock className="w-3 h-3 text-cipher-primary" />
           <span>End-to-end encrypted</span>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

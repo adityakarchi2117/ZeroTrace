@@ -31,7 +31,8 @@ async def send_message(
         encrypted_key=message.encrypted_key,
         expiry_type=message.expiry_type,
         message_type=message.message_type,
-        file_metadata=message.file_metadata
+        file_metadata=message.file_metadata,
+        sender_theme=message.sender_theme
     )
     
     # Attempt real-time delivery over WebSocket

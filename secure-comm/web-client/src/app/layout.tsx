@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import AppearanceProvider from '@/components/AppearanceProvider';
+import { MotionProvider } from '@/lib/motion';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -29,12 +30,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className={`${inter.className} bg-gray-900 text-white antialiased`} suppressHydrationWarning>
-        <AppearanceProvider>
-          <div id="root" className="min-h-screen">
-            {children}
-          </div>
-          <div id="modal-root" />
-        </AppearanceProvider>
+        <MotionProvider>
+          <AppearanceProvider>
+            <div id="root" className="min-h-screen">
+              {children}
+            </div>
+            <div id="modal-root" />
+          </AppearanceProvider>
+        </MotionProvider>
       </body>
     </html>
   );

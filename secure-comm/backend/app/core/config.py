@@ -30,6 +30,8 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://10.100.42.35:3000",
+        "http://10.100.42.35:8000",
     ]
     ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1", "*"]
     

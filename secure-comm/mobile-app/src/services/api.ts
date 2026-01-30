@@ -3,7 +3,7 @@ import { showMessage } from 'react-native-flash-message';
 
 // API Configuration
 const API_BASE_URL = __DEV__
-  ? 'http://localhost:8000/api'  // Development
+  ? 'http://10.100.42.35:8000/api'  // Development
   : 'https://api.cipherlink.app/api';  // Production
 
 // Create axios instance

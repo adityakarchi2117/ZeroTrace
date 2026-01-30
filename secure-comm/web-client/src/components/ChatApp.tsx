@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useStore } from '@/lib/store';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ParticleField } from '@/lib/motion';
 import Sidebar from './Sidebar';
 import ChatView from './ChatView';
 import NewChatModal from './NewChatModal';
@@ -13,44 +15,116 @@ export default function ChatApp() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     loadContacts();
     loadConversations();
     loadCallHistory();
     initializeWebSocket();
+
+    // Detect mobile
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, [loadContacts, loadConversations, loadCallHistory, initializeWebSocket]);
 
   return (
-    <div className="h-screen bg-cipher-darker flex overflow-hidden">
+    <div className="h-screen bg-cipher-darker flex overflow-hidden relative">
+      {/* Background particles for premium feel */}
+      <ParticleField density="low" className="opacity-30" />
+
       {/* Mobile Menu Button */}
-      <button
+      <motion.button
         onClick={() => setShowSidebar(!showSidebar)}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-cipher-dark rounded-lg text-gray-400 hover:text-white"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
       >
         {showSidebar ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-      </button>
+      </motion.button>
 
-      {/* Sidebar */}
-      <div className={`
-        fixed lg:relative inset-y-0 left-0 z-40
-        transform ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
-        lg:translate-x-0 transition-transform duration-200 ease-in-out
-        w-80 bg-cipher-dark border-r border-gray-800
-      `}>
+      {/* Sidebar with 3D effect */}
+      <motion.div
+        className={`
+          fixed lg:relative inset-y-0 left-0 z-40
+          w-80 bg-cipher-dark border-r border-gray-800
+          transform ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
+          lg:translate-x-0
+        `}
+        initial={false}
+        animate={{
+          x: showSidebar ? 0 : -320,
+          rotateY: showSidebar && !isMobile ? 0 : 5,
+          scale: showSidebar ? 1 : 0.95,
+        }}
+        transition={{
+          type: 'spring',
+          stiffness: 300,
+          damping: 30,
+        }}
+        style={{
+          transformStyle: 'preserve-3d',
+          perspective: 1200,
+          transformOrigin: 'left center',
+        }}
+      >
         <Sidebar
           onNewChat={() => setShowNewChat(true)}
           onSettings={() => setShowSettings(true)}
         />
-      </div>
+      </motion.div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {currentConversation ? (
-          <ChatView />
-        ) : (
-          <EmptyState />
-        )}
+      {/* Main Chat Area with 3D transition */}
+      <div className="flex-1 flex flex-col relative">
+        <AnimatePresence mode="wait">
+          {currentConversation ? (
+            <motion.div
+              key="chat"
+              className="flex-1 flex flex-col h-full"
+              initial={{ 
+                x: 50, 
+                opacity: 0,
+                rotateY: -10,
+              }}
+              animate={{ 
+                x: 0, 
+                opacity: 1,
+                rotateY: 0,
+              }}
+              exit={{ 
+                x: -30, 
+                opacity: 0,
+                rotateY: 10,
+              }}
+              transition={{
+                type: 'spring',
+                stiffness: 300,
+                damping: 30,
+              }}
+              style={{
+                transformStyle: 'preserve-3d',
+                perspective: 1200,
+              }}
+            >
+              <ChatView />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              className="flex-1 flex items-center justify-center"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
+            >
+              <EmptyState />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Modals */}
@@ -58,32 +132,65 @@ export default function ChatApp() {
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       {/* Mobile Overlay */}
-      {showSidebar && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-30"
-          onClick={() => setShowSidebar(false)}
-        />
-      )}
+      <AnimatePresence>
+        {showSidebar && isMobile && (
+          <motion.div
+            className="lg:hidden fixed inset-0 bg-black/50 z-30 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowSidebar(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-20 h-20 bg-gradient-to-br from-cipher-primary/20 to-cipher-secondary/20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <Lock className="w-10 h-10 text-cipher-primary" />
-        </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Welcome to CipherLink</h2>
-        <p className="text-gray-400 max-w-md">
-          Select a conversation or start a new chat to begin sending end-to-end encrypted messages.
-        </p>
-        <div className="mt-6 flex items-center justify-center gap-2 text-sm text-gray-500">
-          <Lock className="w-4 h-4" />
-          <span>All messages are encrypted on your device</span>
-        </div>
-      </div>
+    <div className="text-center">
+      <motion.div
+        className="w-20 h-20 bg-gradient-to-br from-cipher-primary/20 to-cipher-secondary/20 rounded-full flex items-center justify-center mx-auto mb-6"
+        initial={{ scale: 0, rotate: -180 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{
+          type: 'spring',
+          stiffness: 200,
+          damping: 15,
+          delay: 0.2,
+        }}
+      >
+        <Lock className="w-10 h-10 text-cipher-primary" />
+      </motion.div>
+      
+      <motion.h2
+        className="text-2xl font-bold text-white mb-2"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        Welcome to CipherLink
+      </motion.h2>
+      
+      <motion.p
+        className="text-gray-400 max-w-md"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.4 }}
+      >
+        Select a conversation or start a new chat to begin sending end-to-end encrypted messages.
+      </motion.p>
+      
+      <motion.div
+        className="mt-6 flex items-center justify-center gap-2 text-sm text-gray-500"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+      >
+        <Lock className="w-4 h-4" />
+        <span>All messages are encrypted on your device</span>
+      </motion.div>
     </div>
   );
 }

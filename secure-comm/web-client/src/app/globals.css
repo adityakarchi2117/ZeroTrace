@@ -13,8 +13,15 @@
   --cipher-secondary: var(--color-cipher-secondary);
   --cipher-accent: #06b6d4;
   
+  /* RGB values for animations (calculated from hex) */
+  --accent-rgb: 99, 102, 241;
+  --accent-rgb-secondary: 139, 92, 246;
+  
   /* Font size (can be overridden by JS) */
   --base-font-size: 16px;
+  
+  /* 3D Perspective */
+  --perspective: 1200px;
 }
 
 /* Dark theme (default) */
@@ -208,4 +215,126 @@ input:focus, textarea:focus {
 
 .lock-icon:hover {
   transform: scale(1.1);
+}
+
+/* ===== 3D Animation Support ===== */
+
+/* GPU acceleration for animated elements */
+.gpu-accelerated {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Preserve 3D for nested transforms */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+/* Perspective container */
+.perspective-container {
+  perspective: var(--perspective);
+  perspective-origin: center center;
+}
+
+/* Smooth scroll for message lists */
+.smooth-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* High-performance animations */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-gpu {
+    will-change: transform, opacity;
+    transform: translateZ(0);
+  }
+}
+
+/* Glass morphism variants */
+.glass-light {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Message bubble 3D hover effect */
+.message-3d {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 0.3s ease;
+}
+
+.message-3d:hover {
+  transform: translateY(-2px) scale(1.01);
+}
+
+/* Particle container */
+.particle-container {
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Call portal overlay */
+.portal-overlay {
+  clip-path: circle(0% at 50% 50%);
+  transition: clip-path 0.6s cubic-bezier(0.87, 0, 0.13, 1);
+}
+
+.portal-overlay.active {
+  clip-path: circle(150% at 50% 50%);
+}
+
+/* Shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Glow pulse animation */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(var(--accent-rgb), 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.6), 0 0 40px rgba(var(--accent-rgb), 0.3);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
 }
