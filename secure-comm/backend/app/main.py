@@ -186,8 +186,10 @@ app.add_middleware(
 )
 
 # Debug configuration
+logger.info(f"📋 ENVIRONMENT: {settings.ENVIRONMENT}")
 logger.info(f"📋 ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}")
 logger.info(f"📋 ALLOWED_ORIGINS: {settings.ALLOWED_ORIGINS}")
+logger.info(f"📋 CORS_ORIGINS env: {settings.CORS_ORIGINS}")
 
 # Security middleware
 app.add_middleware(
@@ -221,7 +223,20 @@ async def health_check():
     return {
         "status": "healthy",
         "database": "connected",
-        "websocket": "active"
+        "websocket": "active",
+        "cors_origins": settings.ALLOWED_ORIGINS,
+        "environment": settings.ENVIRONMENT,
+    }
+
+
+@app.get("/api/debug/cors", tags=["Debug"])
+async def debug_cors(request: Request):
+    """Debug CORS configuration"""
+    return {
+        "message": "CORS is working!",
+        "origin": request.headers.get("origin", "No origin header"),
+        "allowed_origins": settings.ALLOWED_ORIGINS,
+        "environment": settings.ENVIRONMENT,
     }
 
 
