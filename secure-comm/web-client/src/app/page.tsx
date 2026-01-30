@@ -1,7 +1,11 @@
 'use client';
 
-import { CallState } from '../lib/webrtc';
+import { useState, useMemo } from 'react';
+import { useStore } from '../lib/store';
 import { useAppearance } from '../lib/useAppearance';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MotionAvatar, TiltCard } from '../components/motion';
+import { motionVariants } from '../lib/motion/config';
 import AuthScreen from '../components/AuthScreen';
 import ChatApp from '../components/ChatApp';
 
