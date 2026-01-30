@@ -92,6 +92,11 @@ class Settings(BaseSettings):
             # Deployed frontend
             "https://zero-trace-virid.vercel.app",
         ]
+        # Also check for common typos in env var
+        if self.CORS_ORIGINS:
+            # Remove trailing slashes and fix double protocols
+            cleaned = self.CORS_ORIGINS.replace("https://https://", "https://").replace("http://http://", "http://").rstrip("/")
+            return parse_env_list(cleaned, defaults)
         # Allow all origins in CORS_ORIGINS env var
         return parse_env_list(self.CORS_ORIGINS, defaults)
     
