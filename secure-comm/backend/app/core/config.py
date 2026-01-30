@@ -6,6 +6,17 @@ from functools import lru_cache
 import json
 
 
+def clean_origin(origin: str) -> str:
+    """Clean origin URL - fix common typos"""
+    origin = origin.strip()
+    # Fix double protocols
+    origin = origin.replace("https://https://", "https://")
+    origin = origin.replace("http://http://", "http://")
+    # Remove trailing slash
+    origin = origin.rstrip("/")
+    return origin
+
+
 def parse_env_list(env_value: str, default: List[str]) -> List[str]:
     """Parse environment variable as JSON list or comma-separated values"""
     if not env_value:
@@ -16,10 +27,10 @@ def parse_env_list(env_value: str, default: List[str]) -> List[str]:
     try:
         parsed = json.loads(env_value)
         if isinstance(parsed, list):
-            return parsed
-        return [str(parsed)]
+            return [clean_origin(item) for item in parsed]
+        return [clean_origin(str(parsed))]
     except json.JSONDecodeError:
-        return [item.strip() for item in env_value.split(",") if item.strip()]
+        return [clean_origin(item) for item in env_value.split(",") if item.strip()]
 
 
 class Settings(BaseSettings):
@@ -92,12 +103,7 @@ class Settings(BaseSettings):
             # Deployed frontend
             "https://zero-trace-virid.vercel.app",
         ]
-        # Also check for common typos in env var
-        if self.CORS_ORIGINS:
-            # Remove trailing slashes and fix double protocols
-            cleaned = self.CORS_ORIGINS.replace("https://https://", "https://").replace("http://http://", "http://").rstrip("/")
-            return parse_env_list(cleaned, defaults)
-        # Allow all origins in CORS_ORIGINS env var
+        # Parse and clean origins
         return parse_env_list(self.CORS_ORIGINS, defaults)
     
     @computed_field
