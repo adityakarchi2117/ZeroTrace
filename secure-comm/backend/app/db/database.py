@@ -6,19 +6,27 @@ from app.core.config import settings
 
 # Configure engine based on database type
 if settings.is_postgres:
-    # PostgreSQL configuration
+    # PostgreSQL configuration with SSL for production
+    connect_args = {}
+    if settings.ENVIRONMENT == "production":
+        connect_args["sslmode"] = "require"
+    
     engine = create_engine(
         settings.DATABASE_URL,
         pool_size=5,
         max_overflow=10,
         pool_timeout=30,
         pool_recycle=1800,
+        connect_args=connect_args,
+        # Prevent SQL injection logging
+        echo=settings.DEBUG,  # Only log SQL in debug mode
     )
 else:
     # SQLite configuration
     engine = create_engine(
         settings.DATABASE_URL,
-        connect_args={"check_same_thread": False}
+        connect_args={"check_same_thread": False},
+        echo=settings.DEBUG,
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
