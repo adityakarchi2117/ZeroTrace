@@ -1,13 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useStore } from '../lib/store';
-import { useAppearance } from '../lib/useAppearance';
-import { motion, AnimatePresence } from 'framer-motion';
-import { MotionAvatar, TiltCard } from '../components/motion';
-import { motionVariants } from '../lib/motion/config';
-import AuthScreen from '../components/AuthScreen';
-import ChatApp from '../components/ChatApp';
+import { useEffect } from 'react';
+import { useStore } from '@/lib/store';
+import AuthScreen from '@/components/AuthScreen';
+import ChatApp from '@/components/ChatApp';
 
 export default function Home() {
   const { isAuthenticated, isLoading, loadStoredAuth } = useStore();
