@@ -1,18 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore } from '@/lib/store';
-import { api } from '@/lib/api';
+import { useStore } from '../lib/store';
+import { api } from '../lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   decryptMessage,
   EncryptedMessage,
   generateFingerprint
-} from '@/lib/crypto';
-import { useAppearance } from '@/lib/useAppearance';
-import { wsManager } from '@/lib/websocket';
-import { webrtcService, CallState } from '@/lib/webrtc';
-import { EncryptionLock } from '@/lib/motion';
+} from '../lib/crypto';
+import { useAppearance } from '../lib/useAppearance';
+import { wsManager } from '../lib/websocket';
+import { webrtcService, CallState } from '../lib/webrtc';
+import { EncryptionLock } from '../lib/motion';
 import { CallView } from './CallView';
 import {
   Lock, Send, Smile, Paperclip, Phone, Video,

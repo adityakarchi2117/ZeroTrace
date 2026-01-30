@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useStore } from '@/lib/store';
-import AuthScreen from '@/components/AuthScreen';
-import ChatApp from '@/components/ChatApp';
+import { CallState } from '../lib/webrtc';
+import { useAppearance } from '../lib/useAppearance';
+import AuthScreen from '../components/AuthScreen';
+import ChatApp from '../components/ChatApp';
 
 export default function Home() {
   const { isAuthenticated, isLoading, loadStoredAuth } = useStore();
