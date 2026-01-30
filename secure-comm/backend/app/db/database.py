@@ -4,10 +4,22 @@ from datetime import datetime
 import enum
 from app.core.config import settings
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
-)
+# Configure engine based on database type
+if settings.is_postgres:
+    # PostgreSQL configuration
+    engine = create_engine(
+        settings.DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
+else:
+    # SQLite configuration
+    engine = create_engine(
+        settings.DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

@@ -14,13 +14,11 @@ def parse_env_list(env_value: str, default: List[str]) -> List[str]:
     if not env_value:
         return default
     try:
-        # Try JSON first
         parsed = json.loads(env_value)
         if isinstance(parsed, list):
             return parsed
         return [str(parsed)]
     except json.JSONDecodeError:
-        # Fall back to comma-separated
         return [item.strip() for item in env_value.split(",") if item.strip()]
 
 
@@ -29,20 +27,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "CipherLink"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str = "production"
     
     # ============ API Settings ============
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "CipherLink API"
     
     # ============ Security ============
-    SECRET_KEY: str = "your-secret-key-here-change-in-production-use-openssl-rand-hex-32"
+    SECRET_KEY: str = Field(default="your-secret-key-here-change-in-production-use-openssl-rand-hex-32")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # ============ Database ============
-    DATABASE_URL: str = "sqlite:///./cipherlink_v3.db"
+    # Defaults to SQLite for local dev, override with DATABASE_URL env var for PostgreSQL
+    DATABASE_URL: str = Field(default="sqlite:///./cipherlink_v3.db")
     
     # ============ CORS - Env vars for configuration ============
     CORS_ORIGINS: str = Field(default="", description="Comma-separated or JSON list of allowed origins")
@@ -59,20 +58,20 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW: int = 60  # seconds
     
     # ============ Encryption Settings ============
-    MIN_PREKEY_COUNT: int = 10  # Trigger refill below this
-    MAX_PREKEY_BATCH: int = 100  # Max prekeys per upload
+    MIN_PREKEY_COUNT: int = 10
+    MAX_PREKEY_BATCH: int = 100
     SIGNED_PREKEY_ROTATION_DAYS: int = 7
     
     # ============ Message Settings ============
-    MAX_MESSAGE_SIZE: int = 65536  # 64KB max message size
-    MESSAGE_CLEANUP_INTERVAL: int = 60  # seconds
+    MAX_MESSAGE_SIZE: int = 65536
+    MESSAGE_CLEANUP_INTERVAL: int = 60
     
     # ============ Vault Settings ============
     MAX_VAULT_ITEMS: int = 1000
-    MAX_VAULT_ITEM_SIZE: int = 1048576  # 1MB per item
+    MAX_VAULT_ITEM_SIZE: int = 1048576
     
     # ============ File Upload ============
-    MAX_FILE_SIZE: int = 52428800  # 50MB
+    MAX_FILE_SIZE: int = 52428800
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -96,14 +95,12 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def ALLOWED_HOSTS(self) -> List[str]:
-        """Get allowed hosts from CORS_HOSTS env var or defaults"""
         defaults = ["localhost", "127.0.0.1", "*"]
         return parse_env_list(self.CORS_HOSTS, defaults)
     
     @computed_field
     @property
     def ALLOWED_FILE_TYPES(self) -> List[str]:
-        """Get allowed file types from FILE_TYPES env var or defaults"""
         defaults = [
             "image/jpeg",
             "image/png",
@@ -114,11 +111,15 @@ class Settings(BaseSettings):
             "application/zip",
         ]
         return parse_env_list(self.FILE_TYPES, defaults)
+    
+    @computed_field
+    @property
+    def is_postgres(self) -> bool:
+        return "postgresql" in self.DATABASE_URL.lower() or "postgres" in self.DATABASE_URL.lower()
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Cached settings instance"""
     return Settings()
 
 
