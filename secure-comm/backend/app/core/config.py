@@ -89,7 +89,10 @@ class Settings(BaseSettings):
             "http://localhost:5173",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
+            # Add your deployed frontend URL here
+            # "https://your-frontend.onrender.com",
         ]
+        # Allow all origins in CORS_ORIGINS env var
         return parse_env_list(self.CORS_ORIGINS, defaults)
     
     @computed_field
