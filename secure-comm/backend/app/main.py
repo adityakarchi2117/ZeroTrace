@@ -97,6 +97,25 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("📊 Database tables created/verified")
     
+    # Create demo user if none exists (for testing)
+    from app.db.database import SessionLocal
+    from app.db.user_repo import UserRepository
+    from app.core.security import get_password_hash
+    
+    db = SessionLocal()
+    try:
+        user_repo = UserRepository(db)
+        if not user_repo.get_by_username("demo"):
+            hashed_password = get_password_hash("demo123")
+            user_repo.create("demo", "demo@example.com", hashed_password)
+            logger.info("👤 Demo user created (username: demo, password: demo123)")
+        else:
+            logger.info("👤 Demo user already exists")
+    except Exception as e:
+        logger.error(f"⚠️  Error creating demo user: {e}")
+    finally:
+        db.close()
+    
     # Start background tasks
     cleanup_task = asyncio.create_task(cleanup_expired_messages())
     rotation_task = asyncio.create_task(rotate_signed_prekeys())
