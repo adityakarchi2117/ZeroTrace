@@ -135,8 +135,8 @@ export const getWallpaperCSSValue = (wallpaper: WallpaperSettings): string => {
   
   if (wallpaper.type === 'preset') {
     const preset = presetWallpapers.find(p => p.id === wallpaper.value);
-    if (preset && preset.id !== 'none') {
-      return preset.value;
+    if (preset && preset.id !== 'none' && 'value' in preset) {
+      return preset.value as string;
     }
     return 'none';
   }
