@@ -8,6 +8,14 @@ export type AccentColor = 'blue' | 'purple' | 'green' | 'orange' | 'pink' | 'cya
 export type FontSize = 'small' | 'medium' | 'large';
 export type ChatDensity = 'compact' | 'comfortable' | 'spacious';
 
+export interface WallpaperSettings {
+  enabled: boolean;
+  type: 'preset' | 'custom' | 'url';
+  value: string; // preset name, base64 data, or URL
+  opacity: number; // 0-100
+  blur: number; // 0-20px
+}
+
 export interface AppearanceSettings {
   theme: ThemeMode;
   accent: AccentColor;
@@ -15,6 +23,7 @@ export interface AppearanceSettings {
   density: ChatDensity;
   messagePreview: boolean;
   animationsEnabled: boolean;
+  wallpaper: WallpaperSettings;
 }
 
 // Accent color configurations
@@ -42,6 +51,28 @@ export const fontSizeConfig: Record<FontSize, { base: string; small: string; xs:
 };
 
 const STORAGE_KEY = 'cipherlink_appearance';
+const WALLPAPER_STORAGE_KEY = 'cipherlink_wallpaper';
+
+// Preset wallpapers (gradient patterns)
+export const presetWallpapers = [
+  { id: 'none', name: 'None', preview: 'transparent' },
+  { id: 'gradient-1', name: 'Midnight', value: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' },
+  { id: 'gradient-2', name: 'Purple Haze', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)' },
+  { id: 'gradient-3', name: 'Ocean', value: 'linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%)' },
+  { id: 'gradient-4', name: 'Sunset', value: 'linear-gradient(135deg, #232526 0%, #414345 50%, #232526 100%)' },
+  { id: 'gradient-5', name: 'Forest', value: 'linear-gradient(135deg, #134e5e 0%, #71b280 100%)' },
+  { id: 'gradient-6', name: 'Cyberpunk', value: 'linear-gradient(135deg, #0f0f0f 0%, #1a0a1a 50%, #0a1a1a 100%)' },
+  { id: 'dots', name: 'Dots Pattern', value: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.1) 1px, transparent 0)' },
+  { id: 'grid', name: 'Grid Pattern', value: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)' },
+];
+
+const defaultWallpaper: WallpaperSettings = {
+  enabled: false,
+  type: 'preset',
+  value: 'gradient-1',
+  opacity: 100,
+  blur: 0,
+};
 
 const defaultSettings: AppearanceSettings = {
   theme: 'dark',
@@ -50,6 +81,7 @@ const defaultSettings: AppearanceSettings = {
   density: 'comfortable',
   messagePreview: true,
   animationsEnabled: true,
+  wallpaper: defaultWallpaper,
 };
 
 // Apply theme to document
@@ -97,6 +129,70 @@ const applyAnimations = (enabled: boolean) => {
   document.documentElement.classList.toggle('reduce-motion', !enabled);
 };
 
+// Get wallpaper CSS value
+export const getWallpaperCSSValue = (wallpaper: WallpaperSettings): string => {
+  if (!wallpaper.enabled) return 'none';
+  
+  if (wallpaper.type === 'preset') {
+    const preset = presetWallpapers.find(p => p.id === wallpaper.value);
+    if (preset && preset.id !== 'none') {
+      return preset.value;
+    }
+    return 'none';
+  }
+  
+  if (wallpaper.type === 'custom' || wallpaper.type === 'url') {
+    return `url(${wallpaper.value})`;
+  }
+  
+  return 'none';
+};
+
+// Apply wallpaper to document
+const applyWallpaper = (wallpaper: WallpaperSettings) => {
+  if (typeof window === 'undefined') return;
+  
+  const root = document.documentElement;
+  const cssValue = getWallpaperCSSValue(wallpaper);
+  
+  root.style.setProperty('--chat-wallpaper', cssValue);
+  root.style.setProperty('--chat-wallpaper-opacity', String(wallpaper.opacity / 100));
+  root.style.setProperty('--chat-wallpaper-blur', `${wallpaper.blur}px`);
+  
+  // Toggle wallpaper class
+  if (wallpaper.enabled && cssValue !== 'none') {
+    root.classList.add('has-wallpaper');
+  } else {
+    root.classList.remove('has-wallpaper');
+  }
+};
+
+// Save custom wallpaper image to localStorage
+export const saveCustomWallpaper = (base64Image: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(WALLPAPER_STORAGE_KEY, base64Image);
+  } catch (e) {
+    console.error('Failed to save wallpaper:', e);
+  }
+};
+
+// Load custom wallpaper from localStorage
+export const loadCustomWallpaper = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(WALLPAPER_STORAGE_KEY);
+  } catch (e) {
+    return null;
+  }
+};
+
+// Delete custom wallpaper
+export const deleteCustomWallpaper = (): void => {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(WALLPAPER_STORAGE_KEY);
+};
+
 // Load settings from localStorage
 export const loadAppearanceSettings = (): AppearanceSettings => {
   if (typeof window === 'undefined') return defaultSettings;
@@ -139,6 +235,7 @@ export function useAppearance() {
     applyAccentColor(loaded.accent);
     applyFontSize(loaded.fontSize);
     applyAnimations(loaded.animationsEnabled);
+    applyWallpaper(loaded.wallpaper);
   }, []);
 
   // Listen for system theme changes
@@ -162,6 +259,7 @@ export function useAppearance() {
         applyAccentColor(newSettings.accent);
         applyFontSize(newSettings.fontSize);
         applyAnimations(newSettings.animationsEnabled);
+        applyWallpaper(newSettings.wallpaper);
       }
     };
 
@@ -180,6 +278,7 @@ export function useAppearance() {
       if (updates.accent !== undefined) applyAccentColor(updates.accent);
       if (updates.fontSize !== undefined) applyFontSize(updates.fontSize);
       if (updates.animationsEnabled !== undefined) applyAnimations(updates.animationsEnabled);
+      if (updates.wallpaper !== undefined) applyWallpaper(updates.wallpaper);
       
       return newSettings;
     });
@@ -214,6 +313,29 @@ export function useAppearance() {
     accentColors,
     densityConfig,
     fontSizeConfig,
+    presetWallpapers,
+    updateWallpaper: (updates: Partial<WallpaperSettings>) => {
+      setSettings(prev => {
+        const newWallpaper = { ...prev.wallpaper, ...updates };
+        const newSettings = { ...prev, wallpaper: newWallpaper };
+        saveAppearanceSettings(newSettings);
+        applyWallpaper(newWallpaper);
+        return newSettings;
+      });
+    },
+    getWallpaperStyle: () => {
+      const cssValue = getWallpaperCSSValue(settings.wallpaper);
+      if (cssValue === 'none') return {};
+      
+      return {
+        backgroundImage: cssValue,
+        backgroundSize: settings.wallpaper.type === 'custom' || settings.wallpaper.type === 'url' ? 'cover' : 'initial',
+        backgroundPosition: 'center',
+        backgroundRepeat: settings.wallpaper.type === 'custom' || settings.wallpaper.type === 'url' ? 'no-repeat' : 'initial',
+        opacity: settings.wallpaper.opacity / 100,
+        filter: `blur(${settings.wallpaper.blur}px)`,
+      };
+    },
   };
 }
 
@@ -226,4 +348,5 @@ export function initializeAppearance() {
   applyAccentColor(settings.accent);
   applyFontSize(settings.fontSize);
   applyAnimations(settings.animationsEnabled);
+  applyWallpaper(settings.wallpaper);
 }

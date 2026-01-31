@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ParticleField } from '@/lib/motion';
+import { useAppearance, getWallpaperCSSValue } from '@/lib/useAppearance';
 import Sidebar from './Sidebar';
 import ChatView from './ChatView';
 import NewChatModal from './NewChatModal';
@@ -12,6 +13,8 @@ import { Lock, Menu, X } from 'lucide-react';
 
 export default function ChatApp() {
   const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation } = useStore();
+  const { settings } = useAppearance();
+  const { wallpaper } = settings;
   const [showSidebar, setShowSidebar] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -29,6 +32,23 @@ export default function ChatApp() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, [loadContacts, loadConversations, loadCallHistory, initializeWebSocket]);
+
+  // Get wallpaper style
+  const getWallpaperStyle = (): React.CSSProperties => {
+    if (!wallpaper.enabled) return {};
+    
+    const cssValue = getWallpaperCSSValue(wallpaper);
+    if (cssValue === 'none') return {};
+    
+    return {
+      backgroundImage: cssValue,
+      backgroundSize: wallpaper.type === 'custom' || wallpaper.type === 'url' ? 'cover' : 'initial',
+      backgroundPosition: 'center',
+      backgroundRepeat: wallpaper.type === 'custom' || wallpaper.type === 'url' ? 'no-repeat' : 'initial',
+      opacity: wallpaper.opacity / 100,
+      filter: `blur(${wallpaper.blur}px)`,
+    };
+  };
 
   return (
     <div className="h-screen bg-cipher-darker flex overflow-hidden relative">
@@ -80,7 +100,18 @@ export default function ChatApp() {
 
       {/* Main Chat Area with 3D transition */}
       <div className="flex-1 flex flex-col relative">
-        <AnimatePresence mode="wait">
+        {/* Wallpaper Layer */}
+        {wallpaper.enabled && (
+          <div
+            className="absolute inset-0 z-0 pointer-events-none chat-background"
+            data-wallpaper-type={wallpaper.type}
+            style={getWallpaperStyle()}
+          />
+        )}
+        
+        {/* Chat Content */}
+        <div className="relative z-10 flex-1 flex flex-col chat-content">
+          <AnimatePresence mode="wait">
           {currentConversation ? (
             <motion.div
               key="chat"
@@ -125,6 +156,7 @@ export default function ChatApp() {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
 
       {/* Modals */}

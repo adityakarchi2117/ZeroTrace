@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance, accentColors, ThemeMode, AccentColor, FontSize, ChatDensity } from '@/lib/useAppearance';
+import { WallpaperSettings } from './WallpaperSettings';
 import { api } from '@/lib/api';
 import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type } from 'lucide-react';
 import { loadBubbleStyle, saveBubbleStyle, loadFontStyle, saveFontStyle, bubbleStyles, fontStyles } from '@/lib/themeSync';
@@ -519,6 +520,11 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       })}
                     </div>
                   </div>
+                </div>
+
+                {/* Wallpaper Settings */}
+                <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <WallpaperSettings />
                 </div>
 
                 {/* Preview */}

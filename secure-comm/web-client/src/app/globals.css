@@ -22,6 +22,11 @@
   
   /* 3D Perspective */
   --perspective: 1200px;
+  
+  /* Wallpaper (set by JS) */
+  --chat-wallpaper: none;
+  --chat-wallpaper-opacity: 1;
+  --chat-wallpaper-blur: 0px;
 }
 
 /* Dark theme (default) */
@@ -337,4 +342,99 @@ input:focus, textarea:focus {
 
 .glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* ===== Wallpaper Styles ===== */
+
+/* Wallpaper layer in chat area */
+.has-wallpaper .chat-background {
+  position: relative;
+}
+
+.has-wallpaper .chat-background::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--chat-wallpaper);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--chat-wallpaper-opacity);
+  filter: blur(var(--chat-wallpaper-blur));
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Pattern wallpapers (dots/grid) need different sizing */
+.has-wallpaper .chat-background[data-wallpaper-type="preset"]::before {
+  background-size: initial;
+}
+
+/* Ensure chat content stays above wallpaper */
+.chat-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* Wallpaper preset thumbnails */
+.wallpaper-preset {
+  transition: all 0.2s ease;
+}
+
+.wallpaper-preset:hover {
+  transform: scale(1.05);
+}
+
+.wallpaper-preset.selected {
+  ring: 2px solid var(--cipher-primary);
+  transform: scale(1.05);
+}
+
+/* Custom wallpaper upload area */
+.wallpaper-upload {
+  transition: all 0.2s ease;
+  border: 2px dashed var(--border-color);
+}
+
+.wallpaper-upload:hover {
+  border-color: var(--cipher-primary);
+  background: rgba(var(--accent-rgb), 0.05);
+}
+
+.wallpaper-upload.dragging {
+  border-color: var(--cipher-primary);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+/* Range slider styling for opacity/blur */
+input[type="range"][data-wallpaper-control] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  outline: none;
+}
+
+input[type="range"][data-wallpaper-control]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cipher-primary);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+input[type="range"][data-wallpaper-control]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cipher-primary);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
