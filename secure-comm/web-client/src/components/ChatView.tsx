@@ -12,6 +12,7 @@ import {
 import { useAppearance } from '@/lib/useAppearance';
 import { wsManager } from '@/lib/websocket';
 import { webrtcService, CallState } from '@/lib/webrtc';
+import { useWebRTC } from '@/lib/useWebRTC';
 import { EncryptionLock } from '@/lib/motion';
 import { CallView } from './CallView';
 import {
@@ -115,12 +116,26 @@ export default function ChatView() {
   const [isSending, setIsSending] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [callState, setCallState] = useState<CallState | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
+  // Use the new WebRTC hook
+  const {
+    callState,
+    isMuted,
+    isVideoOff,
+    callDuration,
+    localStream,
+    remoteStream,
+    startCall,
+    answerCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    toggleVideo,
+    error: callError,
+    clearError,
+  } = useWebRTC();
+  
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
   const [showCallChat, setShowCallChat] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -206,54 +221,21 @@ export default function ChatView() {
     }
   }, [newMessage, currentConversation]);
 
-  useEffect(() => {
-    webrtcService.setOnCallStateChange((state) => {
-      setCallState(state);
-    });
-
-    return () => {
-      webrtcService.setOnCallStateChange(null);
-    };
-  }, []);
-
-  // Sync mute/video state from call state
-  useEffect(() => {
-    if (callState) {
-      if (callState.isMuted !== undefined) {
-        setIsMuted(callState.isMuted);
-      }
-      if (callState.isVideoOff !== undefined) {
-        setIsVideoOff(callState.isVideoOff);
-      }
-    }
-  }, [callState?.isMuted, callState?.isVideoOff]);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (callState?.status === 'connected' && callState.startTime) {
-      interval = setInterval(() => {
-        const now = new Date();
-        const start = new Date(callState.startTime!);
-        setCallDuration(Math.floor((now.getTime() - start.getTime()) / 1000));
-      }, 1000);
-    } else {
-      setCallDuration(0);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [callState?.status, callState?.startTime]);
-
-  // Reset mute/video states when call ends
+  // Reset screen sharing when call ends
   useEffect(() => {
     if (!callState || callState.status === 'ended' || callState.status === 'failed') {
-      setIsMuted(false);
-      setIsVideoOff(false);
       setIsScreenSharing(false);
     }
   }, [callState?.status]);
+  
+  // Show call errors
+  useEffect(() => {
+    if (callError) {
+      console.error('Call error:', callError);
+      // Could show a toast here
+      clearError();
+    }
+  }, [callError, clearError]);
 
   useEffect(() => {
     const handleClickOutside = () => setShowChatMenu(false);
@@ -349,7 +331,7 @@ export default function ChatView() {
 
   const handleStartCall = async (type: 'audio' | 'video') => {
     if (!currentConversation) return;
-    const success = await webrtcService.startCall(currentConversation, type);
+    const success = await startCall(currentConversation, type);
     if (!success) {
       console.error('Failed to start call');
     }
@@ -357,30 +339,26 @@ export default function ChatView() {
 
   const handleAnswerCall = async () => {
     try {
-      await webrtcService.answerCall();
+      await answerCall();
     } catch (error) {
       console.error('Error answering call:', error);
     }
   };
 
   const handleRejectCall = () => {
-    webrtcService.rejectCall();
-    setCallState(null);
+    rejectCall();
   };
 
   const handleEndCall = () => {
-    webrtcService.endCall();
-    setCallState(null);
+    endCall();
   };
 
   const handleToggleMute = () => {
-    const isNowMuted = webrtcService.toggleMute();
-    setIsMuted(isNowMuted);
+    toggleMute();
   };
 
   const handleToggleVideo = () => {
-    const isNowVideoOff = webrtcService.toggleVideo();
-    setIsVideoOff(isNowVideoOff);
+    toggleVideo();
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -640,8 +618,7 @@ export default function ChatView() {
           </p>
           <button
             onClick={() => {
-              webrtcService.endCall(false);
-              setCallState(null);
+              endCall();
             }}
             className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors"
           >
@@ -670,7 +647,7 @@ export default function ChatView() {
           </p>
           <button
             onClick={() => {
-              setCallState(null);
+              endCall();
             }}
             className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors"
           >
@@ -691,6 +668,8 @@ export default function ChatView() {
         isVideoOff={isVideoOff}
         isScreenSharing={isScreenSharing}
         isFullscreen={isFullscreen}
+        localStream={localStream}
+        remoteStream={remoteStream}
         onToggleMute={handleToggleMute}
         onToggleVideo={handleToggleVideo}
         onToggleScreenShare={handleScreenShare}

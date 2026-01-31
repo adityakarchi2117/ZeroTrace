@@ -1,17 +1,17 @@
 'use client';
 
 /**
- * Fullscreen Call View Component
- * Production-ready video call UI with responsive layout
+ * Production-Ready Call View Component
+ * Handles video/audio element binding with proper cleanup
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { CallState } from '@/lib/webrtc';
 import { useAppearance } from '@/lib/useAppearance';
 import {
   Phone, PhoneOff, Mic, MicOff, Video, VideoOff,
-  Monitor, Maximize2, Minimize2
+  Monitor, Maximize2, Minimize2, Volume2, VolumeX
 } from 'lucide-react';
 
 interface CallViewProps {
@@ -21,6 +21,8 @@ interface CallViewProps {
   isVideoOff: boolean;
   isScreenSharing: boolean;
   isFullscreen: boolean;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
   onToggleMute: () => void;
   onToggleVideo: () => void;
   onToggleScreenShare: () => void;
@@ -37,6 +39,8 @@ export function CallView({
   isVideoOff,
   isScreenSharing,
   isFullscreen,
+  localStream,
+  remoteStream,
   onToggleMute,
   onToggleVideo,
   onToggleScreenShare,
@@ -48,41 +52,87 @@ export function CallView({
   const { getAccentGradient } = useAppearance();
   const accentGradient = getAccentGradient();
 
+  // Video element refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
-  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  
+  // Track element binding state
+  const [localVideoReady, setLocalVideoReady] = useState(false);
+  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
+  const [remoteAudioReady, setRemoteAudioReady] = useState(false);
+  
+  // Speaker state
+  const [isSpeakerOff, setIsSpeakerOff] = useState(false);
 
-  // Handle window resize for responsive layout
+  // Bind local stream to video element
   useEffect(() => {
-    const handleResize = () => {
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    };
-
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-    };
-  }, []);
-
-  // Sync streams to video/audio elements
-  useEffect(() => {
-    if (callState.localStream && localVideoRef.current) {
-      localVideoRef.current.srcObject = callState.localStream;
+    if (localStream && localVideoRef.current) {
+      console.log('📹 Binding local stream to video element');
+      localVideoRef.current.srcObject = localStream;
+      
+      // Try to play
+      localVideoRef.current.play().catch(err => {
+        console.warn('⚠️ Local video play failed:', err);
+      });
+      
+      setLocalVideoReady(true);
     }
-    if (callState.remoteStream) {
+  }, [localStream]);
+
+  // Bind remote stream to video and audio elements
+  useEffect(() => {
+    if (remoteStream) {
+      console.log('📹 Binding remote stream:', {
+        tracks: remoteStream.getTracks().map(t => t.kind),
+        active: remoteStream.active,
+        id: remoteStream.id
+      });
+      
+      // Bind to video element
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = callState.remoteStream;
+        remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRef.current.play().catch(err => {
+          console.warn('⚠️ Remote video play failed:', err);
+        });
+        setRemoteVideoReady(true);
       }
+      
+      // Bind to audio element
       if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = callState.remoteStream;
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.play().catch(err => {
+          console.warn('⚠️ Remote audio play failed:', err);
+        });
+        setRemoteAudioReady(true);
       }
     }
-  }, [callState.localStream, callState.remoteStream]);
+  }, [remoteStream]);
+
+  // Handle visibility changes (mobile)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('📱 Page hidden - keeping connection alive');
+        // Don't stop anything - let WebRTC handle background
+      } else {
+        console.log('📱 Page visible - resuming video');
+        // Resume playback
+        if (localVideoRef.current && localStream) {
+          localVideoRef.current.play().catch(() => {});
+        }
+        if (remoteVideoRef.current && remoteStream) {
+          remoteVideoRef.current.play().catch(() => {});
+        }
+        if (remoteAudioRef.current && remoteStream) {
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [localStream, remoteStream]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -90,25 +140,28 @@ export function CallView({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const isVideoCall = callState.type === 'video';
-  const hasRemoteVideo = callState.remoteStream && callState.remoteStream.getVideoTracks().length > 0;
-  const isMobile = windowSize.width < 768;
+  const toggleSpeaker = () => {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.muted = !isSpeakerOff;
+      setIsSpeakerOff(!isSpeakerOff);
+    }
+  };
 
-  // Determine layout based on call state
+  const isVideoCall = callState.type === 'video';
+  const hasRemoteVideo = remoteStream?.getVideoTracks().some(t => t.readyState === 'live') ?? false;
+  const hasLocalVideo = localStream?.getVideoTracks().some(t => t.readyState === 'live') ?? false;
+  
   const showRemoteVideo = isVideoCall && hasRemoteVideo && callState.status === 'connected';
-  const showLocalVideo = isVideoCall && callState.status !== 'ringing';
+  const showLocalVideo = isVideoCall && hasLocalVideo && callState.status !== 'ringing';
 
   return (
-    <div
-      className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden flex flex-col"
-      style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
-    >
-      {/* Remote Video - Fullscreen Background */}
-      {/* Remote Audio - Always rendered for reliable audio playback */}
+    <div className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden flex flex-col">
+      {/* Hidden audio element for reliable audio playback */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
+        className="hidden"
       />
 
       {/* Remote Video - Fullscreen Background */}
@@ -116,11 +169,13 @@ export function CallView({
         ref={remoteVideoRef}
         autoPlay
         playsInline
-        muted // Mute the video element since we have a separate audio element
-        className={`absolute inset-0 w-full h-full object-cover ${showRemoteVideo ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        muted // Mute video element (audio plays through separate element)
+        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
+          showRemoteVideo ? 'opacity-100' : 'opacity-0'
+        }`}
       />
 
-      {/* Avatar Background - Overlay when video is not shown */}
+      {/* Avatar/Status Background - When video not shown */}
       {!showRemoteVideo && (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-gray-900 to-black z-10">
           <div className="text-center">
@@ -152,11 +207,20 @@ export function CallView({
                 </span>
               )}
             </p>
+            
+            {/* Debug info in development */}
+            {process.env.NODE_ENV === 'development' && (
+              <p className="text-gray-600 text-xs mt-4">
+                Local: {localStream ? '✓' : '✗'} | 
+                Remote: {remoteStream ? '✓' : '✗'} | 
+                State: {callState.status}
+              </p>
+            )}
           </div>
         </div>
       )}
 
-      {/* Top Bar - Caller Info */}
+      {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-50 p-4 md:p-6 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
         <div className="flex items-center gap-3">
           <div
@@ -181,25 +245,28 @@ export function CallView({
         </div>
 
         {callState.status === 'connected' && (
-          <button
-            onClick={onToggleFullscreen}
-            className="p-2 md:p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-          >
-            {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleSpeaker}
+              className="p-2 md:p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+              title={isSpeakerOff ? "Turn on speaker" : "Turn off speaker"}
+            >
+              {isSpeakerOff ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={onToggleFullscreen}
+              className="p-2 md:p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+            >
+              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+          </div>
         )}
       </div>
 
       {/* Local Video - Picture in Picture */}
       {showLocalVideo && (
         <motion.div
-          className={`
-            absolute z-40 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20
-            ${isMobile
-              ? 'bottom-28 right-4 w-28 h-36'
-              : 'bottom-32 right-6 w-48 h-36 md:w-64 md:h-48'
-            }
-          `}
+          className="absolute z-40 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 bottom-28 right-4 w-28 h-36 md:bottom-32 md:right-6 md:w-48 md:h-36"
           initial={{ x: 100, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: 0.3 }}
@@ -223,10 +290,17 @@ export function CallView({
             />
           )}
 
-          {/* Mute indicator on local video */}
+          {/* Mute indicator */}
           {isMuted && (
             <div className="absolute bottom-2 right-2 p-1.5 bg-red-500 rounded-full">
               <MicOff className="w-3 h-3 text-white" />
+            </div>
+          )}
+          
+          {/* Stream status indicator */}
+          {!localVideoReady && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             </div>
           )}
         </motion.div>
@@ -266,13 +340,12 @@ export function CallView({
           {/* Active Call Controls */}
           {(callState.status === 'calling' || callState.status === 'connecting' || callState.status === 'connected') && (
             <>
-              {/* Mute Button */}
+              {/* Mute */}
               <motion.button
                 onClick={onToggleMute}
-                className={`
-                  p-4 md:p-5 rounded-full transition-all shadow-lg
-                  ${isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'}
-                `}
+                className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
+                  isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
               >
@@ -283,14 +356,13 @@ export function CallView({
                 )}
               </motion.button>
 
-              {/* Video Toggle (Video calls only) */}
+              {/* Video Toggle */}
               {isVideoCall && (
                 <motion.button
                   onClick={onToggleVideo}
-                  className={`
-                    p-4 md:p-5 rounded-full transition-all shadow-lg
-                    ${isVideoOff ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'}
-                  `}
+                  className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
+                    isVideoOff ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.95 }}
                 >
@@ -302,14 +374,13 @@ export function CallView({
                 </motion.button>
               )}
 
-              {/* Screen Share (Connected video calls only) */}
+              {/* Screen Share */}
               {isVideoCall && callState.status === 'connected' && (
                 <motion.button
                   onClick={onToggleScreenShare}
-                  className={`
-                    p-4 md:p-5 rounded-full transition-all shadow-lg
-                    ${isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}
-                  `}
+                  className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
+                    isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.95 }}
                 >
@@ -334,6 +405,12 @@ export function CallView({
         <p className="text-center text-gray-400 text-sm mt-4">
           {callState.status === 'connecting' && 'Establishing secure connection...'}
           {callState.status === 'calling' && 'Waiting for answer...'}
+          {callState.status === 'connected' && (
+            <span className="text-green-500 flex items-center justify-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full" />
+              Connected
+            </span>
+          )}
         </p>
       </div>
     </div>
