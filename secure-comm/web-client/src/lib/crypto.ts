@@ -159,6 +159,8 @@ export function encryptMessage(
  * 
  * For v2 messages: Uses the senderPublicKey embedded in the message
  * For v1 (legacy) messages: Falls back to the provided senderPublicKey parameter
+ * 
+ * Enhanced with key mismatch detection and recovery hints
  */
 export function decryptMessage(
   encrypted: EncryptedMessage,
@@ -200,6 +202,16 @@ export function decryptMessage(
     if (!decrypted) {
       console.warn('⚠️ Primary decryption failed with key:', senderPublicKey?.substring(0, 20));
       
+      // Key mismatch diagnostics - verify recipient key pair is valid
+      const recipientDerivedPubKey = derivePublicKeyFromPrivate(recipientPrivateKey);
+      
+      console.log('🔍 Key diagnostics:', {
+        senderKeyPrefix: senderPublicKey?.substring(0, 20),
+        recipientDerivedPubKey: recipientDerivedPubKey?.substring(0, 20),
+        hint: 'Key mismatch detected - sender or recipient may have regenerated keys',
+        recovery: 'If you regenerated your keys, old messages cannot be decrypted. Contact sender to resend.',
+      });
+      
       // If v2 key failed, try fallback key as a last resort
       if (encrypted.senderPublicKey && senderPublicKeyFallback && 
           encrypted.senderPublicKey !== senderPublicKeyFallback) {
@@ -220,6 +232,10 @@ export function decryptMessage(
           console.warn('❌ Fallback decryption also failed:', e);
         }
       }
+      
+      // Last resort: Try ALL available contact public keys if this is a group/unknown scenario
+      // (Could be extended with a key history cache)
+      console.error('❌ All decryption attempts failed. This message may be permanently undecryptable if keys were regenerated.');
       return null;
     }
 

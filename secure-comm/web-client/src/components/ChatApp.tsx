@@ -33,23 +33,6 @@ export default function ChatApp() {
     return () => window.removeEventListener('resize', checkMobile);
   }, [loadContacts, loadConversations, loadCallHistory, initializeWebSocket]);
 
-  // Get wallpaper style
-  const getWallpaperStyle = (): React.CSSProperties => {
-    if (!wallpaper.enabled) return {};
-    
-    const cssValue = getWallpaperCSSValue(wallpaper);
-    if (cssValue === 'none') return {};
-    
-    return {
-      backgroundImage: cssValue,
-      backgroundSize: wallpaper.type === 'custom' || wallpaper.type === 'url' ? 'cover' : 'initial',
-      backgroundPosition: 'center',
-      backgroundRepeat: wallpaper.type === 'custom' || wallpaper.type === 'url' ? 'no-repeat' : 'initial',
-      opacity: wallpaper.opacity / 100,
-      filter: `blur(${wallpaper.blur}px)`,
-    };
-  };
-
   return (
     <div className="h-screen bg-cipher-darker flex overflow-hidden relative">
       {/* Background particles for premium feel */}
@@ -99,23 +82,31 @@ export default function ChatApp() {
       </motion.div>
 
       {/* Main Chat Area with 3D transition */}
-      <div className="flex-1 flex flex-col relative">
-        {/* Wallpaper Layer */}
+      <div 
+        className="flex-1 flex flex-col relative"
+        style={{
+          backgroundImage: wallpaper.enabled ? getWallpaperCSSValue(wallpaper) : undefined,
+          backgroundSize: wallpaper.enabled && (wallpaper.type === 'custom' || wallpaper.type === 'url') ? 'cover' : 'initial',
+          backgroundPosition: 'center',
+          backgroundRepeat: wallpaper.enabled && (wallpaper.type === 'custom' || wallpaper.type === 'url') ? 'no-repeat' : 'initial',
+        }}
+      >
+        {/* Wallpaper overlay for opacity/blur */}
         {wallpaper.enabled && (
-          <div
-            className="absolute inset-0 z-0 pointer-events-none chat-background"
-            data-wallpaper-type={wallpaper.type}
-            style={getWallpaperStyle()}
+          <div 
+            className="absolute inset-0 pointer-events-none z-0"
+            style={{
+              backdropFilter: `blur(${wallpaper.blur}px)`,
+              opacity: wallpaper.opacity / 100,
+            }}
           />
         )}
         
-        {/* Chat Content */}
-        <div className="relative z-10 flex-1 flex flex-col chat-content">
-          <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait">
           {currentConversation ? (
             <motion.div
               key="chat"
-              className="flex-1 flex flex-col h-full"
+              className="flex-1 flex flex-col h-full relative z-10"
               initial={{ 
                 x: 50, 
                 opacity: 0,
@@ -146,7 +137,7 @@ export default function ChatApp() {
           ) : (
             <motion.div
               key="empty"
-              className="flex-1 flex items-center justify-center"
+              className="flex-1 flex items-center justify-center relative z-10"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -156,7 +147,6 @@ export default function ChatApp() {
             </motion.div>
           )}
         </AnimatePresence>
-        </div>
       </div>
 
       {/* Modals */}
