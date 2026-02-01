@@ -17,12 +17,13 @@ import { useWebRTC } from '@/lib/useWebRTC';
 import { EncryptionLock } from '@/lib/motion';
 import { CallView } from './CallView';
 import { SmartCallOverlay } from './SmartCallOverlay';
+import QRCodeDisplay from './QRCodeDisplay';
 import {
   Lock, Send, Smile, Paperclip, Phone, Video,
   MoreVertical, Shield, Check, CheckCheck, Clock,
   ArrowLeft, Info, X, PhoneOff, Mic, MicOff,
   VideoOff, Image, File, Loader2, Download, FileText,
-  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff
+  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff, QrCode
 } from 'lucide-react';
 import { format } from 'date-fns';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
@@ -157,6 +158,7 @@ export default function ChatView() {
   } | null>(null);
 
   const [showChatMenu, setShowChatMenu] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(false);
 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     visible: boolean;
@@ -928,6 +930,20 @@ export default function ChatView() {
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Delete for everyone</span>
+                </button>
+                
+                <div className="border-t border-gray-700 my-1" />
+                
+                {/* Show My QR Code */}
+                <button
+                  onClick={() => {
+                    setShowQRCode(true);
+                    setShowChatMenu(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-blue-400 hover:bg-blue-500/10 transition-colors"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>Show my QR code</span>
                 </button>
                 
                 <div className="border-t border-gray-700 my-1" />
@@ -1744,6 +1760,12 @@ export default function ChatView() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
-    </div >
+
+      {/* QR Code Display Modal */}
+      <QRCodeDisplay
+        isOpen={showQRCode}
+        onClose={() => setShowQRCode(false)}
+      />
+    </div>
   );
 }
