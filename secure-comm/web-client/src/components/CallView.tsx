@@ -84,26 +84,52 @@ export function CallView({
   useEffect(() => {
     if (remoteStream) {
       console.log('📹 Binding remote stream:', {
-        tracks: remoteStream.getTracks().map(t => t.kind),
+        tracks: remoteStream.getTracks().map(t => `${t.kind}(${t.readyState})`),
         active: remoteStream.active,
         id: remoteStream.id
       });
       
+      // Check for audio tracks
+      const audioTracks = remoteStream.getAudioTracks();
+      console.log(`🎵 Remote audio tracks: ${audioTracks.length}`, audioTracks.map(t => t.readyState));
+      
+      // Check for video tracks  
+      const videoTracks = remoteStream.getVideoTracks();
+      console.log(`📹 Remote video tracks: ${videoTracks.length}`, videoTracks.map(t => t.readyState));
+      
       // Bind to video element
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
-        remoteVideoRef.current.play().catch(err => {
-          console.warn('⚠️ Remote video play failed:', err);
-        });
+        const playPromise = remoteVideoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(err => {
+            console.warn('⚠️ Remote video play failed:', err);
+            // Auto-play was prevented, user interaction needed
+          });
+        }
         setRemoteVideoReady(true);
       }
       
-      // Bind to audio element
+      // Bind to audio element - CRITICAL for hearing remote audio
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = remoteStream;
-        remoteAudioRef.current.play().catch(err => {
-          console.warn('⚠️ Remote audio play failed:', err);
-        });
+        remoteAudioRef.current.muted = false; // Ensure not muted
+        remoteAudioRef.current.volume = 1.0; // Full volume
+        
+        const playPromise = remoteAudioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log('✅ Remote audio playing');
+          }).catch(err => {
+            console.warn('⚠️ Remote audio play failed (autoplay policy):', err);
+            // Try to play again after user interaction
+            const playAudio = () => {
+              remoteAudioRef.current?.play().catch(() => {});
+              document.removeEventListener('click', playAudio);
+            };
+            document.addEventListener('click', playAudio);
+          });
+        }
         setRemoteAudioReady(true);
       }
     }
@@ -116,7 +142,7 @@ export function CallView({
         console.log('📱 Page hidden - keeping connection alive');
         // Don't stop anything - let WebRTC handle background
       } else {
-        console.log('📱 Page visible - resuming video');
+        console.log('📱 Page visible - resuming video/audio');
         // Resume playback
         if (localVideoRef.current && localStream) {
           localVideoRef.current.play().catch(() => {});
@@ -124,8 +150,11 @@ export function CallView({
         if (remoteVideoRef.current && remoteStream) {
           remoteVideoRef.current.play().catch(() => {});
         }
+        // CRITICAL: Resume audio playback
         if (remoteAudioRef.current && remoteStream) {
-          remoteAudioRef.current.play().catch(() => {});
+          remoteAudioRef.current.play().catch((err) => {
+            console.warn('⚠️ Could not resume audio:', err);
+          });
         }
       }
     };
@@ -133,6 +162,29 @@ export function CallView({
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [localStream, remoteStream]);
+
+  // Try to play audio when call connects (workaround for autoplay policy)
+  useEffect(() => {
+    if (callState.status === 'connected' && remoteStream && remoteAudioRef.current) {
+      console.log('📞 Call connected - attempting to play audio');
+      const playAudio = () => {
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.play().then(() => {
+            console.log('✅ Audio playing after connection');
+          }).catch((err) => {
+            console.warn('⚠️ Audio autoplay blocked, will retry on user interaction:', err);
+          });
+        }
+      };
+      
+      // Try immediately
+      playAudio();
+      
+      // Also try after a short delay (sometimes helps)
+      const timeout = setTimeout(playAudio, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [callState.status, remoteStream]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -142,8 +194,10 @@ export function CallView({
 
   const toggleSpeaker = () => {
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.muted = !isSpeakerOff;
-      setIsSpeakerOff(!isSpeakerOff);
+      const newMutedState = !isSpeakerOff;
+      remoteAudioRef.current.muted = newMutedState;
+      console.log(`🔊 Speaker ${newMutedState ? 'muted' : 'unmuted'}`);
+      setIsSpeakerOff(newMutedState);
     }
   };
 
@@ -154,13 +208,25 @@ export function CallView({
   const showRemoteVideo = isVideoCall && hasRemoteVideo && callState.status === 'connected';
   const showLocalVideo = isVideoCall && hasLocalVideo && callState.status !== 'ringing';
 
+  // Handle click to enable audio (browser autoplay policy workaround)
+  const handleContainerClick = useCallback(() => {
+    // Try to play audio if it's not already playing
+    if (remoteAudioRef.current && remoteAudioRef.current.paused && remoteStream) {
+      remoteAudioRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
   return (
-    <div className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden flex flex-col">
+    <div 
+      className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden flex flex-col"
+      onClick={handleContainerClick}
+    >
       {/* Hidden audio element for reliable audio playback */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
+        preload="auto"
         className="hidden"
       />
 
