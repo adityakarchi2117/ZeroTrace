@@ -16,7 +16,7 @@ import NotificationToast, { useNotificationToasts } from './NotificationToast';
 import { Lock, Menu, X, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
 export default function ChatApp() {
-  const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation, publicKey } = useStore();
+  const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation, publicKey, messages, setCurrentConversation, user } = useStore();
   const { settings } = useAppearance();
   const { wallpaper } = settings;
   const [showSidebar, setShowSidebar] = useState(true);
@@ -29,7 +29,40 @@ export default function ChatApp() {
   const [isMobile, setIsMobile] = useState(false);
   
   // Notification toast system
-  const { notifications, dismissNotification, showSuccess, showError } = useNotificationToasts();
+  const { notifications, dismissNotification, showSuccess, showError, showMessage } = useNotificationToasts();
+
+  // Track last message IDs to detect new messages
+  const [lastMessageIds, setLastMessageIds] = useState<Set<number>>(new Set());
+
+  // Show toast notifications for new messages
+  useEffect(() => {
+    if (!user) return;
+    
+    messages.forEach((conversationMessages, username) => {
+      // Skip if this is the current conversation
+      if (username === currentConversation) return;
+      
+      conversationMessages.forEach((msg) => {
+        // Only show notification for new messages not from current user
+        if (!lastMessageIds.has(msg.id) && msg.sender_username !== user.username) {
+          // Add to tracked IDs
+          setLastMessageIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(msg.id);
+            return newSet;
+          });
+          
+          // Show toast notification
+          const messageText = msg._decryptedContent || 
+            (msg.message_type === 'image' ? '📷 Image' : 'New message');
+          
+          showMessage(username, messageText, () => {
+            setCurrentConversation(username);
+          });
+        }
+      });
+    });
+  }, [messages, currentConversation, user, showMessage, setCurrentConversation, lastMessageIds]);
 
   useEffect(() => {
     loadContacts();

@@ -20,6 +20,7 @@ import {
   CheckCircle,
   AlertTriangle,
   Info,
+  MessageSquare,
 } from 'lucide-react';
 
 // Notification types
@@ -35,7 +36,8 @@ export type NotificationType =
   | 'system'
   | 'success'
   | 'error'
-  | 'info';
+  | 'info'
+  | 'message';
 
 export interface ToastNotification {
   id: string;
@@ -82,6 +84,8 @@ const getIcon = (type: NotificationType) => {
       return <AlertTriangle className="w-5 h-5" />;
     case 'info':
       return <Info className="w-5 h-5" />;
+    case 'message':
+      return <MessageSquare className="w-5 h-5" />;
     default:
       return <Bell className="w-5 h-5" />;
   }
@@ -135,6 +139,13 @@ const getColors = (type: NotificationType) => {
         border: 'border-yellow-500/30',
         icon: 'text-yellow-400',
         iconBg: 'bg-yellow-500/20',
+      };
+    case 'message':
+      return {
+        bg: 'bg-purple-500/10',
+        border: 'border-purple-500/30',
+        icon: 'text-purple-400',
+        iconBg: 'bg-purple-500/20',
       };
     default:
       return {
@@ -380,6 +391,23 @@ export function useNotificationToasts() {
     [addNotification]
   );
 
+  const showMessage = useCallback(
+    (username: string, message: string, onClick?: () => void) => {
+      return addNotification({
+        type: 'message',
+        title: `New message from ${username}`,
+        message: message.length > 50 ? message.substring(0, 50) + '...' : message,
+        username,
+        duration: 5000,
+        action: onClick ? {
+          label: 'View',
+          onClick,
+        } : undefined,
+      });
+    },
+    [addNotification]
+  );
+
   return {
     notifications,
     addNotification,
@@ -392,5 +420,6 @@ export function useNotificationToasts() {
     showKeyChanged,
     showSuccess,
     showError,
+    showMessage,
   };
 }
