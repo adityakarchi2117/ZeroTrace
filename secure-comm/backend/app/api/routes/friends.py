@@ -203,58 +203,88 @@ async def accept_friend_request(
     - Creates bidirectional trusted contacts
     - Keys are exchanged securely
     """
-    repo = FriendRepository(db)
-    
-    # Get the request first to find sender_id for notification
-    friend_request = db.query(FriendRequestModel).filter(
-        FriendRequestModel.id == accept_data.request_id,
-        FriendRequestModel.receiver_id == user_id,
-        FriendRequestModel.status == FriendRequestStatusEnum.PENDING
-    ).first()
-    
-    sender_id = friend_request.sender_id if friend_request else None
-    
-    success, error, contact = repo.accept_friend_request(
-        request_id=accept_data.request_id,
-        receiver_id=user_id,
-        receiver_fingerprint=accept_data.receiver_public_key_fingerprint,
-        verified_sender_fingerprint=accept_data.verify_sender_fingerprint
-    )
-    
-    if not success:
+    try:
+        repo = FriendRepository(db)
+        
+        # Get the request first to find sender_id for notification
+        friend_request = db.query(FriendRequestModel).filter(
+            FriendRequestModel.id == accept_data.request_id,
+            FriendRequestModel.receiver_id == user_id,
+            FriendRequestModel.status == FriendRequestStatusEnum.PENDING
+        ).first()
+        
+        if not friend_request:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Friend request not found or already processed"
+            )
+        
+        sender_id = friend_request.sender_id
+        
+        success, error, contact = repo.accept_friend_request(
+            request_id=accept_data.request_id,
+            receiver_id=user_id,
+            receiver_fingerprint=accept_data.receiver_public_key_fingerprint,
+            verified_sender_fingerprint=accept_data.verify_sender_fingerprint
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error
+            )
+        
+        if not contact:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create contact"
+            )
+        
+        # Get contact user info
+        contact_user = db.query(User).filter(User.id == contact.contact_user_id).first()
+        
+        if not contact_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Contact user not found"
+            )
+        
+        # Get receiver (current user) info for notification
+        receiver = db.query(User).filter(User.id == user_id).first()
+        
+        # Notify the original sender that their request was accepted
+        if sender_id and receiver:
+            await notify_friend_request_accepted(
+                sender_id=sender_id,
+                accepter_username=receiver.username,
+                contact_fingerprint=accept_data.receiver_public_key_fingerprint
+            )
+        
+        return TrustedContactResponse(
+            id=contact.id,
+            user_id=contact.user_id,
+            contact_user_id=contact.contact_user_id,
+            contact_username=contact_user.username,
+            public_key=contact_user.public_key,
+            identity_key=contact_user.identity_key,
+            public_key_fingerprint=contact.contact_public_key_fingerprint,
+            trust_level=contact.trust_level,
+            nickname=contact.encrypted_nickname,
+            is_verified=contact.is_verified,
+            last_key_exchange=contact.last_key_exchange,
+            created_at=contact.created_at
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error accepting friend request: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to accept friend request: {str(e)}"
         )
-    
-    # Get contact user info
-    contact_user = db.query(User).filter(User.id == contact.contact_user_id).first()
-    
-    # Get receiver (current user) info for notification
-    receiver = db.query(User).filter(User.id == user_id).first()
-    
-    # Notify the original sender that their request was accepted
-    if sender_id and receiver:
-        await notify_friend_request_accepted(
-            sender_id=sender_id,
-            accepter_username=receiver.username,
-            contact_fingerprint=accept_data.receiver_public_key_fingerprint
-        )
-    
-    return TrustedContactResponse(
-        id=contact.id,
-        user_id=contact.user_id,
-        contact_user_id=contact.contact_user_id,
-        contact_username=contact_user.username,
-        public_key=contact_user.public_key,
-        identity_key=contact_user.identity_key,
-        public_key_fingerprint=contact.contact_public_key_fingerprint,
-        trust_level=contact.trust_level,
-        nickname=contact.encrypted_nickname,
-        is_verified=contact.is_verified,
-        last_key_exchange=contact.last_key_exchange,
-        created_at=contact.created_at
-    )
 
 
 @router.post("/reject", status_code=status.HTTP_200_OK)
