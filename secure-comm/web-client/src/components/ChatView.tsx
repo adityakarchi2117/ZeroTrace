@@ -144,6 +144,9 @@ export default function ChatView() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [contactPublicKey, setContactPublicKey] = useState<string | null>(null);
   const [newMessageIds, setNewMessageIds] = useState<Set<number>>(new Set());
+  
+  // Cache for decrypted message content to avoid re-decrypting on every render
+  const decryptedCacheRef = useRef<Map<number, string>>(new Map());
 
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -199,6 +202,11 @@ export default function ChatView() {
   useEffect(() => {
     loadCallHistory();
   }, [loadCallHistory]);
+
+  // Clear decryption cache when conversation changes
+  useEffect(() => {
+    decryptedCacheRef.current.clear();
+  }, [currentConversation]);
 
   useEffect(() => {
     async function fetchPublicKey() {
@@ -442,7 +450,14 @@ export default function ChatView() {
   };
 
   const decryptContent = useCallback((msg: any): string => {
+    // Check in-memory cache first
+    if (decryptedCacheRef.current.has(msg.id)) {
+      return decryptedCacheRef.current.get(msg.id)!;
+    }
+    
+    // Check message object cache (set by store during load)
     if (msg._decryptedContent) {
+      decryptedCacheRef.current.set(msg.id, msg._decryptedContent);
       return msg._decryptedContent;
     }
 
@@ -453,37 +468,44 @@ export default function ChatView() {
       
       // For v2 messages, the sender's public key is embedded
       // For v1 messages, we need the fallback key from the contact
-      // The contact we're chatting with is the one whose key we need for both sent/received
       let fallbackPublicKey: string | undefined;
       
       // Try all available sources for the public key
       fallbackPublicKey = contactPublicKey || contact?.public_key || conversation?.public_key;
       
+      let decrypted: string | null = null;
+      
       // v2 messages have embedded sender key, so fallback is less critical
       if (encrypted.senderPublicKey) {
         // v2: Use embedded key, fallback is just a safety net
-        const decrypted = decryptMessage(encrypted, fallbackPublicKey || '', privateKey);
-        if (decrypted) return decrypted;
+        decrypted = decryptMessage(encrypted, fallbackPublicKey || '', privateKey);
       } else {
         // v1: Must have fallback key
         if (!fallbackPublicKey) {
-          if (msg.sender_username === user?.username) {
-            return '[Sent message]';
-          }
-          return '[Key not available]';
+          const fallback = msg.sender_username === user?.username ? '[Sent message]' : '[Key not available]';
+          decryptedCacheRef.current.set(msg.id, fallback);
+          return fallback;
         }
-        const decrypted = decryptMessage(encrypted, fallbackPublicKey, privateKey);
-        if (decrypted) return decrypted;
+        decrypted = decryptMessage(encrypted, fallbackPublicKey, privateKey);
+      }
+
+      if (decrypted) {
+        // Cache the successful decryption
+        decryptedCacheRef.current.set(msg.id, decrypted);
+        // Also update the message object for persistence
+        msg._decryptedContent = decrypted;
+        return decrypted;
       }
 
       // Decryption failed
-      if (msg.sender_username === user?.username) {
-        return '[Sent message]';
-      }
-      return '[Decryption failed]';
+      const fallback = msg.sender_username === user?.username ? '[Sent message]' : '[Decryption failed]';
+      decryptedCacheRef.current.set(msg.id, fallback);
+      return fallback;
     } catch (err) {
       console.error('Decryption error:', err);
-      return '[Encrypted message]';
+      const errorMsg = '[Encrypted message]';
+      decryptedCacheRef.current.set(msg.id, errorMsg);
+      return errorMsg;
     }
   }, [privateKey, user, contact, conversation, contactPublicKey]);
 

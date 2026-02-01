@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance } from '@/lib/useAppearance';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MotionAvatar, TiltCard } from '@/components/motion';
-import { motionVariants } from '@/lib/motion/config';
+import { MotionAvatar } from '@/components/motion';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
   Shield, User as UserIcon, Loader2, UserPlus, X, Users,
@@ -30,6 +29,87 @@ interface SearchResult {
   public_key?: string;
   is_online?: boolean;
 }
+
+// Memoized conversation item to prevent unnecessary re-renders
+const ConversationItem = React.memo(({
+  conv,
+  isActive,
+  isOnline,
+  collapsed,
+  accentGradient,
+  formatTime,
+  onClick
+}: {
+  conv: any;
+  isActive: boolean;
+  isOnline: boolean;
+  collapsed: boolean;
+  accentGradient: string;
+  formatTime: (date: string) => string;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        w-full rounded-lg flex items-center transition-all duration-200
+        ${collapsed 
+          ? `justify-center p-2 ${isActive ? 'bg-cipher-primary/30' : 'hover:bg-gray-800'}` 
+          : `p-3 gap-3 ${isActive 
+            ? 'bg-cipher-primary/20 border border-cipher-primary/30' 
+            : 'hover:bg-gray-800'}`}
+      `}
+      title={collapsed ? conv.username : undefined}
+    >
+      <div className="relative flex-shrink-0">
+        <div 
+          className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full flex items-center justify-center transition-colors ${!isActive ? 'bg-gray-700' : ''}`}
+          style={isActive ? { background: accentGradient } : undefined}
+        >
+          <span className={`text-white font-medium ${collapsed ? 'text-sm' : ''}`}>
+            {conv.username.charAt(0).toUpperCase()}
+          </span>
+        </div>
+        {isOnline && (
+          <div className={`absolute -bottom-0.5 -right-0.5 bg-green-500 rounded-full border-2 border-cipher-dark online-indicator ${collapsed ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
+        )}
+        {collapsed && conv.unread_count > 0 && (
+          <span className="absolute -top-1 -right-1 bg-cipher-primary text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+            {conv.unread_count > 9 ? '9+' : conv.unread_count}
+          </span>
+        )}
+      </div>
+      
+      {!collapsed && (
+        <div className="flex-1 min-w-0 text-left">
+          <div className="flex items-center justify-between">
+            <span className={`font-medium truncate ${isActive ? 'text-white' : 'text-gray-200'}`}>
+              {conv.username}
+            </span>
+            <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
+              {formatTime(conv.last_message_time)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between mt-1">
+            <div className="flex items-center gap-1 text-sm text-gray-400 truncate">
+              <Shield className="w-3 h-3 text-cipher-primary flex-shrink-0" />
+              <span className="truncate">
+                {conv.last_message_preview || 'Start conversation'}
+              </span>
+            </div>
+            {conv.unread_count > 0 && (
+              <span className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2">
+                {conv.unread_count}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </button>
+  );
+});
+
+ConversationItem.displayName = 'ConversationItem';
 
 export default function Sidebar({ 
   collapsed = false,
@@ -126,7 +206,7 @@ export default function Sidebar({
     return () => clearInterval(interval);
   }, [fetchPendingRequestCount]);
 
-  // Filter existing conversations based on search query
+  // Filter existing conversations based on search query - memoized
   const filteredConversations = useMemo(() => {
     if (!searchQuery.trim()) return conversations;
     const query = searchQuery.toLowerCase();
@@ -134,6 +214,11 @@ export default function Sidebar({
       conv.username.toLowerCase().includes(query)
     );
   }, [conversations, searchQuery]);
+
+  // Memoize online status lookup
+  const isUserOnline = useCallback((userId: number) => {
+    return onlineUsers.has(userId);
+  }, [onlineUsers]);
 
   // Search for users globally when typing
   const handleSearchChange = async (value: string) => {
@@ -198,7 +283,7 @@ export default function Sidebar({
     setShowGlobalSearch(false);
   };
 
-  const formatTime = (dateString: string | null | undefined) => {
+  const formatTime = useCallback((dateString: string | null | undefined) => {
     if (!dateString) return '';
     const date = new Date(dateString);
     if (isToday(date)) {
@@ -207,120 +292,101 @@ export default function Sidebar({
       return 'Yesterday';
     }
     return format(date, 'dd/MM');
-  };
+  }, []);
 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <motion.div 
+      <div 
         className={`p-4 border-b border-gray-800 ${collapsed ? 'p-2' : ''}`}
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.4 }}
       >
         {/* Header Row */}
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} mb-3`}>
           <div className="flex items-center gap-2">
-            <motion.div 
+            <div 
               className="w-8 h-8 rounded-lg flex items-center justify-center"
               style={{ background: accentGradient }}
-              whileHover={{ scale: 1.1, rotate: 5 }}
-              whileTap={{ scale: 0.95 }}
             >
               <Lock className="w-4 h-4 text-white" />
-            </motion.div>
+            </div>
             {!collapsed && <span className="font-bold text-white dark:text-white">ZeroTrace</span>}
           </div>
           {!collapsed && (
             <div className="flex items-center gap-1">
-              <motion.button
+              <button
                 onClick={onSettings}
                 className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
                 title="Settings"
-                whileHover={{ scale: 1.1, rotate: 30 }}
-                whileTap={{ scale: 0.9 }}
               >
                 <Settings className="w-5 h-5" />
-              </motion.button>
+              </button>
             </div>
           )}
         </div>
 
         {/* Action Buttons Row */}
         <div className={`${collapsed ? 'flex flex-col gap-2' : 'flex items-center justify-between'} bg-gray-800/30 rounded-lg p-1 mb-3`}>
-          <motion.button
+          <button
             onClick={onAddFriend}
             className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors`}
             title="Add Friend"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
           >
             <UserPlus className="w-4 h-4" />
             {!collapsed && <span className="text-[10px]">Add</span>}
-          </motion.button>
+          </button>
           
-          <motion.button
+          <button
             onClick={onPendingRequests}
             className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative`}
             title="Pending Requests"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
           >
             <div className="relative">
               <Users className="w-4 h-4" />
               {pendingRequestCount > 0 && (
-                <motion.span
+                <span
                   className={`absolute -top-2 -right-2 w-4 h-4 bg-yellow-500 text-black text-[9px] rounded-full flex items-center justify-center font-bold ${collapsed ? 'w-3 h-3 text-[8px]' : ''}`}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
                 >
                   {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
-                </motion.span>
+                </span>
               )}
             </div>
             {!collapsed && <span className="text-[10px]">Requests</span>}
-          </motion.button>
+          </button>
           
           {!collapsed && onBlockedUsers && (
-            <motion.button
+            <button
               onClick={onBlockedUsers}
               className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
               title="Blocked Users"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
             >
               <ShieldBan className="w-4 h-4" />
               <span className="text-[10px]">Blocked</span>
-            </motion.button>
+            </button>
           )}
           
-          <motion.button
+          <button
             onClick={onNewChat}
             className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors`}
             title="New Chat"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
           >
             <Plus className="w-4 h-4" />
             {!collapsed && <span className="text-[10px]">New</span>}
-          </motion.button>
+          </button>
           
           {!collapsed && (
-            <motion.button
+            <button
               onClick={refreshContacts}
               disabled={isRefreshingContacts}
               className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
               title="Refresh"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
               <span className="text-[10px]">Refresh</span>
-            </motion.button>
+            </button>
           )}
         </div>
 
-        {/* User Info with Tilt Avatar */}
+        {/* User Info */}
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg`}>
           <MotionAvatar name={user?.username || 'U'} size={collapsed ? 'sm' : 'md'} disableTilt />
           {!collapsed && (
@@ -329,28 +395,21 @@ export default function Sidebar({
                 <p className="font-medium text-white truncate">{user?.username}</p>
                 <p className="text-xs text-gray-500 truncate">{user?.email}</p>
               </div>
-              <motion.button
+              <button
                 onClick={logout}
                 className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
                 title="Logout"
-                whileHover={{ scale: 1.1, x: 2 }}
-                whileTap={{ scale: 0.9 }}
               >
                 <LogOut className="w-4 h-4" />
-              </motion.button>
+              </button>
             </>
           )}
         </div>
-      </motion.div>
+      </div>
 
       {/* Search - Hidden when collapsed */}
       {!collapsed && (
-        <motion.div 
-          className="p-4"
-          initial={{ y: -10, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.1 }}
-        >
+        <div className="p-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
@@ -361,14 +420,12 @@ export default function Sidebar({
               className="w-full bg-cipher-darker border border-gray-700 rounded-lg py-2 pl-10 pr-10 text-sm text-white placeholder-gray-500 focus:border-cipher-primary transition-colors"
             />
             {searchQuery && (
-              <motion.button
+              <button
                 onClick={clearSearch}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
-                whileHover={{ scale: 1.2, rotate: 90 }}
-                whileTap={{ scale: 0.9 }}
               >
                 <X className="w-4 h-4" />
-              </motion.button>
+              </button>
             )}
             {isSearching && (
               <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cipher-primary animate-spin" />
@@ -401,7 +458,6 @@ export default function Sidebar({
                       initial={{ x: -20, opacity: 0 }}
                       animate={{ x: 0, opacity: 1 }}
                       transition={{ delay: index * 0.05 }}
-                      whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.05)' }}
                     >
                       <div className="relative">
                         <div 
@@ -456,133 +512,48 @@ export default function Sidebar({
               </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
+        </div>
       )}
 
-      {/* Conversations List with Stagger Animation */}
-      <motion.div 
-        className="flex-1 overflow-y-auto"
-        variants={motionVariants.stagger}
-        initial="hidden"
-        animate="visible"
-      >
+      {/* Conversations List - Optimized with memoization */}
+      <div className="flex-1 overflow-y-auto">
         {filteredConversations.length === 0 && conversations.length === 0 ? (
-          <motion.div 
-            className="p-8 text-center"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-          >
+          <div className="p-8 text-center">
             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <MessageSquare className="w-8 h-8 text-gray-600" />
             </div>
             <p className="text-gray-400 text-sm">No conversations yet</p>
-            <motion.button
+            <button
               onClick={onNewChat}
               className="mt-3 text-cipher-primary hover:text-cipher-secondary text-sm font-medium"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
             >
               Start a new chat
-            </motion.button>
-          </motion.div>
+            </button>
+          </div>
         ) : filteredConversations.length === 0 && searchQuery ? (
           <div className="p-4 text-center">
             <p className="text-gray-400 text-sm">No conversations match &quot;{searchQuery}&quot;</p>
           </div>
         ) : (
           <div className={`space-y-1 ${collapsed ? 'p-1' : 'p-2'}`}>
-            {filteredConversations.map((conv, index) => {
-              const isActive = currentConversation === conv.username;
-              const isOnline = onlineUsers.has(conv.user_id);
-              
-              return (
-                <motion.button
-                  key={conv.user_id}
-                  onClick={() => setCurrentConversation(conv.username)}
-                  variants={motionVariants.listItem}
-                  whileHover={{ 
-                    x: collapsed ? 0 : 4,
-                    scale: collapsed ? 1.05 : 1,
-                    backgroundColor: isActive ? undefined : 'rgba(255,255,255,0.05)',
-                  }}
-                  whileTap={{ scale: 0.98 }}
-                  className={`
-                    w-full rounded-lg flex items-center transition-colors
-                    ${collapsed 
-                      ? `justify-center p-2 ${isActive ? 'bg-cipher-primary/30' : ''}` 
-                      : `p-3 gap-3 ${isActive 
-                        ? 'bg-cipher-primary/20 border border-cipher-primary/30' 
-                        : 'hover:bg-gray-800'}`}
-                  `}
-                  title={collapsed ? conv.username : undefined}
-                >
-                  <div className="relative flex-shrink-0">
-                    <div 
-                      className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full flex items-center justify-center ${!isActive ? 'bg-gray-700' : ''}`}
-                      style={isActive ? { background: accentGradient } : undefined}
-                    >
-                      <span className={`text-white font-medium ${collapsed ? 'text-sm' : ''}`}>
-                        {conv.username.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    {isOnline && (
-                      <div className={`absolute -bottom-0.5 -right-0.5 bg-green-500 rounded-full border-2 border-cipher-dark online-indicator ${collapsed ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
-                    )}
-                    {collapsed && conv.unread_count > 0 && (
-                      <motion.span 
-                        className="absolute -top-1 -right-1 bg-cipher-primary text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center"
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                      >
-                        {conv.unread_count > 9 ? '9+' : conv.unread_count}
-                      </motion.span>
-                    )}
-                  </div>
-                  
-                  {!collapsed && (
-                    <div className="flex-1 min-w-0 text-left">
-                      <div className="flex items-center justify-between">
-                        <span className={`font-medium truncate ${isActive ? 'text-white' : 'text-gray-200'}`}>
-                          {conv.username}
-                        </span>
-                        <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
-                          {formatTime(conv.last_message_time)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center gap-1 text-sm text-gray-400 truncate">
-                          <Shield className="w-3 h-3 text-cipher-primary flex-shrink-0" />
-                          <span className="truncate">
-                            {conv.last_message_preview || 'Start conversation'}
-                          </span>
-                        </div>
-                        {conv.unread_count > 0 && (
-                          <motion.span 
-                            className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2"
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ type: 'spring', stiffness: 500, damping: 15 }}
-                          >
-                            {conv.unread_count}
-                          </motion.span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </motion.button>
-              );
-            })}
+            {filteredConversations.map((conv) => (
+              <ConversationItem
+                key={conv.user_id}
+                conv={conv}
+                isActive={currentConversation === conv.username}
+                isOnline={isUserOnline(conv.user_id)}
+                collapsed={collapsed}
+                accentGradient={accentGradient}
+                formatTime={formatTime}
+                onClick={() => setCurrentConversation(conv.username)}
+              />
+            ))}
           </div>
         )}
-      </motion.div>
+      </div>
 
       {/* Footer */}
-      <motion.div 
-        className={`p-4 border-t border-gray-800 ${collapsed ? 'p-2' : ''}`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-      >
+      <div className={`p-4 border-t border-gray-800 ${collapsed ? 'p-2' : ''}`}>
         {collapsed ? (
           <div className="flex justify-center">
             <Lock className="w-4 h-4 text-cipher-primary" />
@@ -593,7 +564,7 @@ export default function Sidebar({
             <span>End-to-end encrypted</span>
           </div>
         )}
-      </motion.div>
+      </div>
     </div>
   );
 }
