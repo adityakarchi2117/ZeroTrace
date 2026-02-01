@@ -607,8 +607,12 @@ async def unblock_user(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
-    """Unblock a previously blocked user"""
+    """Unblock a previously blocked user and restore contact if existed"""
     repo = FriendRepository(db)
+    
+    # Get usernames for WebSocket notification
+    user = db.query(User).filter(User.id == user_id).first()
+    blocked_user = db.query(User).filter(User.id == unblock_data.user_id).first()
     
     success, error = repo.unblock_user(user_id, unblock_data.user_id)
     
@@ -618,7 +622,12 @@ async def unblock_user(
             detail=error
         )
     
-    return {"message": "User unblocked"}
+    # Send WebSocket notifications to both users
+    if user and blocked_user:
+        await notify_unblocked(user.username, blocked_user.username)
+    
+    return {"message": "User unblocked successfully. Contact relationship restored if it existed."}
+
 
 
 @router.get("/blocked", response_model=List[BlockedUserResponse])

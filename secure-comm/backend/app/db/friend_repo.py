@@ -553,7 +553,7 @@ class FriendRepository:
     
     def unblock_user(self, user_id: int, blocked_user_id: int) -> Tuple[bool, str]:
         """
-        Unblock a user
+        Unblock a user and restore contact if it existed
         Returns (success, error_message)
         """
         block = self.db.query(BlockedUser).filter(
@@ -564,8 +564,65 @@ class FriendRepository:
         if not block:
             return False, "User is not blocked"
         
+        # Get blocked user's username for notification
+        blocked_user = self.db.query(User).filter(User.id == blocked_user_id).first()
+        
+        # Delete the block
         self.db.delete(block)
+        
+        # Check if there's a removed contact relationship and restore it
+        contact_restored = False
+        contact = self.db.query(TrustedContact).filter(
+            TrustedContact.user_id == user_id,
+            TrustedContact.contact_user_id == blocked_user_id,
+            TrustedContact.is_removed == True
+        ).first()
+        
+        if contact:
+            # Restore the contact relationship
+            contact.is_removed = False
+            contact.removed_at = None
+            contact_restored = True
+            # Keep the original trust level, key fingerprint, and verification status
+            # This preserves chat history and key verification
+        
+        # Check for reverse contact (they had you as contact)
+        reverse_contact = self.db.query(TrustedContact).filter(
+            TrustedContact.user_id == blocked_user_id,
+            TrustedContact.contact_user_id == user_id,
+            TrustedContact.is_removed == True
+        ).first()
+        
+        if reverse_contact:
+            # Restore the reverse contact as well
+            reverse_contact.is_removed = False
+            reverse_contact.removed_at = None
+        
         self.db.commit()
+        
+        # Create notification for both users if contact was restored
+        if contact_restored and blocked_user:
+            # Notify the user who unblocked
+            self.create_notification(
+                user_id=user_id,
+                notification_type=NotificationTypeEnum.USER_UNBLOCKED,
+                title=f"Contact Restored",
+                message=f"You unblocked {blocked_user.username}. Your previous chat history and verified keys have been restored.",
+                payload={"blocked_user_id": blocked_user_id, "contact_restored": True},
+                related_user_id=blocked_user_id
+            )
+            
+            # Notify the user who was unblocked
+            user = self.db.query(User).filter(User.id == user_id).first()
+            if user:
+                self.create_notification(
+                    user_id=blocked_user_id,
+                    notification_type=NotificationTypeEnum.USER_UNBLOCKED,
+                    title=f"Contact Restored",
+                    message=f"{user.username} unblocked you. You can now message each other again.",
+                    payload={"unblocked_by_user_id": user_id, "contact_restored": True},
+                    related_user_id=user_id
+                )
         
         return True, ""
     

@@ -18,7 +18,7 @@ interface BlockedUsersPanelProps {
 }
 
 export default function BlockedUsersPanel({ isOpen, onClose }: BlockedUsersPanelProps) {
-  const { token } = useStore();
+  const { token, loadContacts } = useStore();
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [unblockingUserId, setUnblockingUserId] = useState<number | null>(null);
@@ -64,8 +64,11 @@ export default function BlockedUsersPanel({ isOpen, onClose }: BlockedUsersPanel
     try {
       await friendApi.unblockUser(userId);
       setBlockedUsers((prev) => prev.filter((u) => u.blocked_user_id !== userId));
-      setSuccess('User unblocked successfully');
+      setSuccess('User unblocked successfully. Contact relationship restored.');
       setConfirmUnblock(null);
+      
+      // Reload contacts to show the restored contact
+      await loadContacts();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to unblock user');
     } finally {
