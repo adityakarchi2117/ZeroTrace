@@ -1,14 +1,12 @@
 /**
  * Smart Call Overlay
  * Floating call window that stays visible when app is minimized/tab switched
- * Tracks window focus and repositions automatically
  */
 
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useWindowFocus } from '@/hooks/useWindowFocus';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 interface SmartCallOverlayProps {
@@ -22,7 +20,6 @@ interface SmartCallOverlayProps {
   onToggleVideo: () => void;
   onEndCall: () => void;
   onRestore: () => void;
-  minimizeOnBlur?: boolean;
 }
 
 export function SmartCallOverlay({
@@ -36,10 +33,9 @@ export function SmartCallOverlay({
   onToggleVideo,
   onEndCall,
   onRestore,
-  minimizeOnBlur = true,
 }: SmartCallOverlayProps) {
   const [isMinimized, setIsMinimized] = useState(false);
-  const [showIndicator, setShowIndicator] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -47,74 +43,76 @@ export function SmartCallOverlay({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Window focus tracking
-  const { isFocused, isVisible } = useWindowFocus({
-    onBlur: () => {
-      if (minimizeOnBlur && isInCall) {
+  // Track visibility change (tab switch)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const hidden = document.hidden;
+      console.log('👁️ Visibility changed:', hidden ? 'hidden' : 'visible');
+      
+      if (hidden && isInCall) {
         setIsMinimized(true);
-        setShowIndicator(true);
+        setIsVisible(false);
+      } else {
+        setIsVisible(true);
+        // Don't immediately unminimize - let user click restore
       }
-    },
-    onFocus: () => {
-      if (!minimizeOnBlur) {
-        setIsMinimized(false);
-      }
-    },
-  });
+    };
 
-  // Keep call alive in background
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isInCall]);
+
+  // Track window blur/focus
+  useEffect(() => {
+    const handleBlur = () => {
+      console.log('👁️ Window blurred');
+      if (isInCall) {
+        setIsMinimized(true);
+      }
+    };
+
+    const handleFocus = () => {
+      console.log('👁️ Window focused');
+      setIsVisible(true);
+    };
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isInCall]);
+
+  // Reset when call ends
   useEffect(() => {
     if (!isInCall) {
       setIsMinimized(false);
-      setShowIndicator(false);
-      return;
-    }
-
-    // Show minimized view when not focused
-    if (!isFocused && minimizeOnBlur) {
-      setIsMinimized(true);
-    }
-  }, [isInCall, isFocused, minimizeOnBlur]);
-
-  // Request notification permission
-  useEffect(() => {
-    if (isInCall && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+      setIsVisible(true);
     }
   }, [isInCall]);
 
-  // Send notification when minimized
-  useEffect(() => {
-    if (isMinimized && isInCall && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification('Call in progress', {
-        body: `On call with ${remoteUsername} - ${formatDuration(callDuration)}`,
-        icon: '/favicon.ico',
-        requireInteraction: true,
-      });
-    }
-  }, [isMinimized, isInCall, remoteUsername, callDuration]);
-
   const handleRestore = useCallback(() => {
     setIsMinimized(false);
-    setShowIndicator(false);
     onRestore();
-    
-    // Focus the window
     window.focus();
   }, [onRestore]);
 
   if (!isInCall) return null;
 
+  // Show minimized overlay when tab is hidden or window blurred
+  const shouldShowMinimized = isMinimized || !isVisible;
+
   return (
     <AnimatePresence>
-      {isMinimized ? (
-        // Minimized Floating View
+      {shouldShowMinimized && (
         <motion.div
           key="minimized"
-          className="fixed z-[99999] flex flex-col gap-2"
-          initial={{ opacity: 0, y: 50, scale: 0.8 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 50, scale: 0.8 }}
+          className="fixed z-[99999]"
+          initial={{ opacity: 0, scale: 0.8, y: 50 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.8, y: 50 }}
           style={{
             bottom: '20px',
             right: '20px',
@@ -194,29 +192,14 @@ export function SmartCallOverlay({
             </div>
           </motion.div>
 
-          {/* Background indicator */}
+          {/* Pulsing indicator */}
           <motion.div
             className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full"
             animate={{ scale: [1, 1.2, 1] }}
             transition={{ duration: 1, repeat: Infinity }}
           />
         </motion.div>
-      ) : showIndicator && !isFocused ? (
-        // Small indicator when not focused but not minimized
-        <motion.button
-          key="indicator"
-          className="fixed bottom-4 right-4 z-[99999] p-3 bg-green-500 rounded-full shadow-lg hover:bg-green-600 transition-colors"
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          exit={{ scale: 0 }}
-          onClick={handleRestore}
-        >
-          <Phone className="w-5 h-5 text-white" />
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-white text-green-600 text-xs font-bold rounded-full flex items-center justify-center">
-            {Math.floor(callDuration / 60)}
-          </span>
-        </motion.button>
-      ) : null}
+      )}
     </AnimatePresence>
   );
 }

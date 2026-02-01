@@ -30,6 +30,7 @@ interface CallViewProps {
   onToggleVideo: () => void;
   onToggleScreenShare: () => void;
   onToggleFullscreen: () => void;
+  onSwitchCamera?: () => void;
   onEndCall: () => void;
   onRejectCall?: () => void;
   onAnswerCall?: () => void;
@@ -102,6 +103,7 @@ export function CallView({
   onToggleVideo,
   onToggleScreenShare,
   onToggleFullscreen,
+  onSwitchCamera,
   onEndCall,
   onRejectCall,
   onAnswerCall,
@@ -343,6 +345,21 @@ export function CallView({
                   whileTap={{ scale: 0.95 }}
                 >
                   {isVideoOff ? <VideoOff className="w-6 h-6 text-white" /> : <Video className="w-6 h-6 text-white" />}
+                </motion.button>
+              )}
+
+              {/* Switch Camera (Front/Back) */}
+              {isVideoCall && onSwitchCamera && (
+                <motion.button 
+                  onClick={onSwitchCamera} 
+                  className="p-4 bg-gray-700 rounded-full"
+                  whileHover={{ scale: 1.1 }} 
+                  whileTap={{ scale: 0.95 }}
+                  title="Switch camera"
+                >
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
                 </motion.button>
               )}
 

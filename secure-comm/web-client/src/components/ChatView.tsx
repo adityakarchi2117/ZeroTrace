@@ -397,6 +397,14 @@ export default function ChatView() {
     toggleVideo();
   };
 
+  const handleSwitchCamera = async () => {
+    try {
+      await webrtcService.switchCamera();
+    } catch (error) {
+      console.error('Error switching camera:', error);
+    }
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0 || !currentConversation) return;
@@ -774,6 +782,7 @@ export default function ChatView() {
         onToggleVideo={handleToggleVideo}
         onToggleScreenShare={handleScreenShare}
         onToggleFullscreen={handleFullscreen}
+        onSwitchCamera={handleSwitchCamera}
         onEndCall={handleEndCall}
         onRejectCall={handleRejectCall}
         onAnswerCall={handleAnswerCall}
@@ -1712,7 +1721,6 @@ export default function ChatView() {
           // Scroll to top to show call UI
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
-        minimizeOnBlur={true}
       />
     </div >
   );

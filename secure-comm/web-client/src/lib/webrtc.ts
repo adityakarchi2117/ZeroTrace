@@ -662,6 +662,47 @@ class WebRTCService {
     }
   }
 
+  // Switch between front/back camera
+  async switchCamera(): Promise<boolean> {
+    if (!this.localStream) return false;
+    
+    const currentTrack = this.localStream.getVideoTracks()[0];
+    if (!currentTrack) return false;
+    
+    // Get current facing mode
+    const currentSettings = currentTrack.getSettings();
+    const currentFacingMode = currentSettings.facingMode || 'user';
+    const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+    
+    console.log(`🔄 Switching camera from ${currentFacingMode} to ${newFacingMode}`);
+    
+    try {
+      // Get new camera stream
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacingMode },
+        audio: false, // Keep existing audio
+      });
+      
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) {
+        console.error('❌ No video track in new stream');
+        return false;
+      }
+      
+      // Replace track in peer connection
+      const success = await this.replaceVideoTrack(newVideoTrack);
+      
+      if (success) {
+        console.log('✅ Camera switched successfully');
+      }
+      
+      return success;
+    } catch (error) {
+      console.error('❌ Failed to switch camera:', error);
+      return false;
+    }
+  }
+
   // ============ State Management ============
 
   private notifyStateChange() {
