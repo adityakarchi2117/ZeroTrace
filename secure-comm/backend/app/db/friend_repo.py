@@ -260,6 +260,47 @@ class FriendRepository:
             )
         ).first()
     
+    
+    def _upsert_trusted_contact(
+        self,
+        user_id: int,
+        contact_user_id: int,
+        contact_public_key_fingerprint: str,
+        contact_identity_key_fingerprint: Optional[str]
+    ) -> TrustedContact:
+        """Create or restore a trusted contact"""
+        contact = self.db.query(TrustedContact).filter(
+            TrustedContact.user_id == user_id,
+            TrustedContact.contact_user_id == contact_user_id
+        ).first()
+        
+        if contact:
+            # Restore if it was removed
+            if contact.is_removed:
+                contact.is_removed = False
+                contact.removed_at = None
+            
+            # Update key info
+            contact.contact_public_key_fingerprint = contact_public_key_fingerprint
+            contact.contact_identity_key_fingerprint = contact_identity_key_fingerprint
+            contact.trust_level = TrustLevelEnum.UNVERIFIED
+            contact.is_verified = False
+            contact.verification_date = None
+            contact.last_key_exchange = datetime.utcnow()
+            # Increment key version to signal change
+            contact.key_version += 1
+        else:
+            contact = TrustedContact(
+                user_id=user_id,
+                contact_user_id=contact_user_id,
+                contact_public_key_fingerprint=contact_public_key_fingerprint,
+                contact_identity_key_fingerprint=contact_identity_key_fingerprint,
+                trust_level=TrustLevelEnum.UNVERIFIED
+            )
+            self.db.add(contact)
+            
+        return contact
+
     def accept_friend_request(
         self,
         request_id: int,
@@ -302,25 +343,21 @@ class FriendRepository:
         request.receiver_public_key_fingerprint = receiver_fingerprint
         request.updated_at = datetime.utcnow()
         
-        # Create trusted contact for both users (bidirectional)
-        sender_contact = TrustedContact(
+        # Create trusted contact for both users (bidirectional) using upsert
+        sender_contact = self._upsert_trusted_contact(
             user_id=request.sender_id,
             contact_user_id=request.receiver_id,
             contact_public_key_fingerprint=receiver_fingerprint,
-            contact_identity_key_fingerprint=self._compute_identity_fingerprint(receiver.identity_key),
-            trust_level=TrustLevelEnum.UNVERIFIED
+            contact_identity_key_fingerprint=self._compute_identity_fingerprint(receiver.identity_key)
         )
         
-        receiver_contact = TrustedContact(
+        receiver_contact = self._upsert_trusted_contact(
             user_id=request.receiver_id,
             contact_user_id=request.sender_id,
             contact_public_key_fingerprint=request.sender_public_key_fingerprint,
-            contact_identity_key_fingerprint=self._compute_identity_fingerprint(sender.identity_key),
-            trust_level=TrustLevelEnum.UNVERIFIED
+            contact_identity_key_fingerprint=self._compute_identity_fingerprint(sender.identity_key)
         )
         
-        self.db.add(sender_contact)
-        self.db.add(receiver_contact)
         self.db.commit()
         self.db.refresh(receiver_contact)
         
