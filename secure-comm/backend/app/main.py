@@ -101,7 +101,6 @@ async def lifespan(app: FastAPI):
         logger.info("🔄 Running database migration for PostgreSQL...")
         try:
             from sqlalchemy import text, inspect
-            import secrets
             
             with engine.connect() as conn:
                 inspector = inspect(engine)
@@ -112,50 +111,14 @@ async def lifespan(app: FastAPI):
                     columns = {col['name']: col for col in inspector.get_columns('friend_requests')}
                     logger.info(f"📋 Current friend_requests columns: {list(columns.keys())}")
                     
-                    # Check if sender_id column is missing
-                    if 'sender_id' not in columns:
-                        logger.info("⚠️ Missing sender_id column - fixing schema...")
-                        
-                        # Check if we need to drop and recreate
-                        has_old_schema = 'from_user_id' in columns or 'to_user_id' in columns
-                        
-                        if not has_old_schema:
-                            # Table has incompatible schema - drop and let create_all handle it
-                            logger.info("🗑️ Dropping incompatible friend_requests table...")
-                            conn.execute(text("DROP TABLE IF EXISTS friend_requests CASCADE"))
-                            conn.commit()
-                            logger.info("✅ Dropped old table - will be recreated")
-                        else:
-                            # Migrate from old schema
-                            logger.info("🔄 Migrating from old schema...")
-                            migrations = [
-                                "ADD COLUMN IF NOT EXISTS sender_id INTEGER",
-                                "ADD COLUMN IF NOT EXISTS sender_public_key_fingerprint VARCHAR(64) DEFAULT ''",
-                                "ADD COLUMN IF NOT EXISTS receiver_id INTEGER",
-                                "ADD COLUMN IF NOT EXISTS receiver_public_key_fingerprint VARCHAR(64)",
-                                "ADD COLUMN IF NOT EXISTS encrypted_message TEXT",
-                                "ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW()",
-                                "ADD COLUMN IF NOT EXISTS request_nonce VARCHAR(64) DEFAULT ''"
-                            ]
-                            for migration in migrations:
-                                try:
-                                    conn.execute(text(f"ALTER TABLE friend_requests {migration}"))
-                                except Exception as e:
-                                    logger.warning(f"Migration note: {e}")
-                            
-                            # Copy data from old columns
-                            try:
-                                conn.execute(text("""
-                                    UPDATE friend_requests 
-                                    SET sender_id = COALESCE(from_user_id, 1),
-                                        receiver_id = COALESCE(to_user_id, 1)
-                                    WHERE sender_id IS NULL OR receiver_id IS NULL
-                                """))
-                            except Exception as e:
-                                logger.warning(f"Data migration note: {e}")
-                            
-                            conn.commit()
-                            logger.info("✅ Schema migration completed")
+                    # If table has old schema columns (from_user_id, to_user_id), drop and recreate
+                    has_old_columns = 'from_user_id' in columns or 'to_user_id' in columns
+                    
+                    if has_old_columns:
+                        logger.info("⚠️ Found old schema columns (from_user_id/to_user_id) - dropping table...")
+                        conn.execute(text("DROP TABLE IF EXISTS friend_requests CASCADE"))
+                        conn.commit()
+                        logger.info("✅ Dropped old friend_requests table - will be recreated with correct schema")
                 else:
                     logger.info("📝 friend_requests table will be created fresh")
                     

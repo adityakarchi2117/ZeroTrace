@@ -186,10 +186,10 @@ class ConnectionManager:
         """Deliver ALL unread messages that were sent while user was offline"""
         try:
             db = SessionLocal()
-            # Get ALL messages that haven't been delivered yet (sent OR undelivered)
+            # Get ALL messages that haven't been delivered yet (status = SENT)
             pending = db.query(Message).filter(
                 Message.recipient_id == user_id,
-                Message.status.in_([MessageStatusEnum.SENT, 'undelivered']),
+                Message.status == MessageStatusEnum.SENT,
                 Message.delivered_at.is_(None)
             ).order_by(Message.created_at).all()
             
