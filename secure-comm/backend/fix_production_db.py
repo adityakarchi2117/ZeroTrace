@@ -4,6 +4,7 @@ Run this on Render or any PostgreSQL deployment.
 """
 import os
 import sys
+import secrets
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 
@@ -25,11 +26,75 @@ def fix_friend_requests_schema():
     engine = create_engine(database_url)
     
     with engine.connect() as conn:
-        # Check current schema
+        # First check if friend_requests table exists
         inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        
+        if 'friend_requests' not in tables:
+            print("friend_requests table does not exist. Creating it...")
+            conn.execute(text("""
+                CREATE TABLE friend_requests (
+                    id SERIAL PRIMARY KEY,
+                    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    sender_public_key_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+                    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    receiver_public_key_fingerprint VARCHAR(64),
+                    encrypted_message TEXT,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+                    request_nonce VARCHAR(64) NOT NULL DEFAULT ''
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_sender_id ON friend_requests(sender_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_receiver_id ON friend_requests(receiver_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_status ON friend_requests(status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_sender_receiver ON friend_requests(sender_id, receiver_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_pending ON friend_requests(receiver_id, status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_expires ON friend_requests(expires_at, status)"))
+            conn.commit()
+            print("✅ Created friend_requests table with correct schema")
+            return
+        
+        # Check current schema
         columns = {col['name']: col for col in inspector.get_columns('friend_requests')}
         
         print(f"Current columns: {list(columns.keys())}")
+        
+        # Check if schema is completely incompatible (no sender_id AND no from_user_id)
+        # This means the table was created with a very different schema
+        essential_columns = {'sender_id', 'from_user_id', 'receiver_id', 'to_user_id'}
+        has_any_essential = any(col in columns for col in essential_columns)
+        
+        if not has_any_essential and len(columns) > 1:
+            print("⚠️ Table exists with incompatible schema. Dropping and recreating...")
+            # First, drop old data (this is a clean slate approach)
+            conn.execute(text("DROP TABLE friend_requests CASCADE"))
+            conn.execute(text("""
+                CREATE TABLE friend_requests (
+                    id SERIAL PRIMARY KEY,
+                    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    sender_public_key_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+                    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    receiver_public_key_fingerprint VARCHAR(64),
+                    encrypted_message TEXT,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+                    request_nonce VARCHAR(64) NOT NULL DEFAULT ''
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_sender_id ON friend_requests(sender_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_receiver_id ON friend_requests(receiver_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_requests_status ON friend_requests(status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_sender_receiver ON friend_requests(sender_id, receiver_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_pending ON friend_requests(receiver_id, status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_friend_request_expires ON friend_requests(expires_at, status)"))
+            conn.commit()
+            print("✅ Recreated friend_requests table with correct schema")
+            return
         
         # Check for old column names that need to be migrated
         has_old_schema = 'from_user_id' in columns or 'to_user_id' in columns
@@ -151,8 +216,7 @@ def fix_friend_requests_schema():
             # Generate nonces for existing rows
             print("\nGenerating request_nonces for existing rows...")
             try:
-                import secrets
-                result = conn.execute(text("SELECT id FROM friend_requests WHERE request_nonce = ''"))
+                result = conn.execute(text("SELECT id FROM friend_requests WHERE request_nonce = '' OR request_nonce IS NULL"))
                 rows = result.fetchall()
                 for row in rows:
                     nonce = secrets.token_hex(32)
@@ -170,8 +234,23 @@ def fix_friend_requests_schema():
             print("\n✅ All columns already exist. No migration needed.")
         
         # Verify final schema
+        inspector = inspect(engine)  # Refresh inspector
         columns = {col['name']: col for col in inspector.get_columns('friend_requests')}
         print(f"\nFinal columns: {list(columns.keys())}")
+        
+        # Verify all required columns exist
+        required_columns = ['id', 'sender_id', 'receiver_id', 'status', 'created_at', 'expires_at', 'request_nonce']
+        missing = [col for col in required_columns if col not in columns]
+        if missing:
+            print(f"⚠️ WARNING: Still missing columns: {missing}")
+        else:
+            print("✅ All required columns verified!")
 
 if __name__ == "__main__":
-    fix_friend_requests_schema()
+    try:
+        fix_friend_requests_schema()
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
