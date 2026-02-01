@@ -168,18 +168,42 @@ app = FastAPI(
 )
 
 # CORS middleware - MUST be first
-# For development: allow specific origins
-# For production: use configured origins only
-if settings.ENVIRONMENT == "production":
-    _cors_origins = settings.ALLOWED_ORIGINS
-else:
-    # Development mode - allow localhost origins
-    _cors_origins = [
+# Build the CORS origins list - ALWAYS include both production and development origins
+def get_cors_origins():
+    """Get all CORS origins including defaults and configured ones"""
+    # Start with hardcoded production frontend URL (ensures it's always included)
+    origins = [
+        "https://zero-trace-virid.vercel.app",
+    ]
+    
+    # Add development origins
+    dev_origins = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ]
+    origins.extend(dev_origins)
+    
+    # Add configured origins from settings (if any)
+    if settings.CORS_ORIGINS:
+        from app.core.config import parse_env_list, clean_origin
+        configured = parse_env_list(settings.CORS_ORIGINS, [])
+        for origin in configured:
+            if origin not in origins:
+                origins.append(origin)
+    
+    # Also include any from ALLOWED_ORIGINS that aren't already in the list
+    for origin in settings.ALLOWED_ORIGINS:
+        if origin not in origins:
+            origins.append(origin)
+    
+    return origins
+
+_cors_origins = get_cors_origins()
+
+# Log CORS configuration for debugging
+logger.info(f"🔒 CORS Origins configured: {_cors_origins}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -202,6 +226,34 @@ app.add_middleware(
     TrustedHostMiddleware, 
     allowed_hosts=["*"] # Force allow all for debugging
 )
+
+
+# Global exception handler to ensure CORS headers on errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all uncaught exceptions and ensure CORS headers are set"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Get the origin from the request
+    origin = request.headers.get("origin", "")
+    
+    # Create the response
+    response = JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error": str(exc) if settings.ENVIRONMENT != "production" else "An error occurred"
+        }
+    )
+    
+    # Add CORS headers if origin is allowed
+    if origin in _cors_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -239,11 +291,16 @@ async def health_check():
 @app.get("/api/debug/cors", tags=["Debug"])
 async def debug_cors(request: Request):
     """Debug CORS configuration"""
+    origin = request.headers.get("origin", "No origin header")
     return {
         "message": "CORS is working!",
-        "origin": request.headers.get("origin", "No origin header"),
-        "allowed_origins": settings.ALLOWED_ORIGINS,
+        "request_origin": origin,
+        "origin_in_allowed_list": origin in _cors_origins,
+        "allowed_origins": _cors_origins,
+        "configured_allowed_origins": settings.ALLOWED_ORIGINS,
+        "cors_origins_env": settings.CORS_ORIGINS,
         "environment": settings.ENVIRONMENT,
+        "headers": dict(request.headers),
     }
 
 
