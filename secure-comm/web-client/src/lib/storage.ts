@@ -1,5 +1,5 @@
 /**
- * CipherLink Local Storage Manager
+ * ZeroTrace Local Storage Manager
  * Production-grade IndexedDB implementation for persistent chat history
  */
 
@@ -48,7 +48,7 @@ export interface StoredContact {
 
 class LocalStorageManager {
   private db: IDBDatabase | null = null;
-  private dbName = 'CipherLinkDB';
+  private dbName = 'ZeroTraceDB';
   private version = 1;
 
   async init(): Promise<void> {

@@ -17,7 +17,7 @@ export default function Home() {
       <div className="min-h-screen bg-cipher-darker flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-cipher-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-400">Loading CipherLink...</p>
+          <p className="text-gray-400">Loading ZeroTrace...</p>
         </div>
       </div>
     );

@@ -1,5 +1,5 @@
 """
-🔐 CipherLink API - Private by design. Secure by default.
+🔐 ZeroTrace API - Private by design. Secure by default.
 End-to-end encrypted communication platform
 
 Features:
@@ -23,9 +23,12 @@ from datetime import datetime
 from app.api.routes import auth, keys, messages
 from app.api.routes.vault import router as vault_router
 from app.api.routes.contacts import router as contacts_router
+from app.api.routes.friends import router as friends_router
 from app.api.websocket import router as websocket_router
 from app.core.config import settings
 from app.db.database import engine, Base
+# Import friend models to ensure they're registered with SQLAlchemy
+from app.db.friend_models import FriendRequest, TrustedContact, BlockedUser, FriendRequestRateLimit
 
 # Configure logging
 logging.basicConfig(
@@ -89,7 +92,7 @@ async def rotate_signed_prekeys():
 async def lifespan(app: FastAPI):
     """Application lifecycle events"""
     # Startup
-    logger.info("🚀 Starting CipherLink API...")
+    logger.info("🚀 Starting ZeroTrace API...")
     logger.info(f"🔧 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🗄️  Database: {settings.DATABASE_URL.split('://')[0]}")
     
@@ -126,16 +129,16 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("🛑 Shutting down CipherLink API...")
+    logger.info("🛑 Shutting down ZeroTrace API...")
     cleanup_task.cancel()
     rotation_task.cancel()
     logger.info("✅ Shutdown complete")
 
 
 app = FastAPI(
-    title="CipherLink API",
+    title="ZeroTrace API",
     description="""
-    🔐 **CipherLink** - Private by design. Secure by default.
+    🔐 **ZeroTrace** - Private by design. Secure by default.
     
     End-to-end encrypted communication platform where:
     - Every user owns a cryptographic identity
@@ -165,20 +168,23 @@ app = FastAPI(
 )
 
 # CORS middleware - MUST be first
-# For development: allow all origins (with credentials workaround)
+# For development: allow specific origins
 # For production: use configured origins only
 if settings.ENVIRONMENT == "production":
     _cors_origins = settings.ALLOWED_ORIGINS
-    _allow_credentials = True
 else:
-    # Development mode - more permissive
-    _cors_origins = ["*"]
-    _allow_credentials = False  # Can't use credentials with "*"
+    # Development mode - allow localhost origins
+    _cors_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=_allow_credentials,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -202,6 +208,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(keys.router, prefix="/api/keys", tags=["Key Management"])
 app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
 app.include_router(contacts_router, prefix="/api/contacts", tags=["Contacts"])
+app.include_router(friends_router, prefix="/api/friend", tags=["Friend Requests"])
 app.include_router(vault_router, prefix="/api/vault", tags=["Secure Vault"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
 
@@ -210,7 +217,7 @@ app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
 async def root():
     """API root - status check"""
     return {
-        "name": "CipherLink API",
+        "name": "ZeroTrace API",
         "status": "running",
         "version": "1.0.0",
         "tagline": "Private by design. Secure by default."

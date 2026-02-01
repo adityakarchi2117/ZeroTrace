@@ -8,13 +8,15 @@ import { MotionAvatar, TiltCard } from '@/components/motion';
 import { motionVariants } from '@/lib/motion/config';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
-  Shield, User as UserIcon, Loader2, UserPlus, X
+  Shield, User as UserIcon, Loader2, UserPlus, X, Users
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 
 interface SidebarProps {
   onNewChat: () => void;
   onSettings: () => void;
+  onAddFriend: () => void;
+  onPendingRequests: () => void;
 }
 
 interface SearchResult {
@@ -24,7 +26,7 @@ interface SearchResult {
   is_online?: boolean;
 }
 
-export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
+export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingRequests }: SidebarProps) {
   const { 
     user, conversations, currentConversation, 
     setCurrentConversation, logout, onlineUsers,
@@ -143,9 +145,27 @@ export default function Sidebar({ onNewChat, onSettings }: SidebarProps) {
             >
               <Lock className="w-4 h-4 text-white" />
             </motion.div>
-            <span className="font-bold text-white dark:text-white">CipherLink</span>
+            <span className="font-bold text-white dark:text-white">ZeroTrace</span>
           </div>
           <div className="flex items-center gap-2">
+            <motion.button
+              onClick={onAddFriend}
+              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors"
+              title="Add Friend"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <UserPlus className="w-5 h-5" />
+            </motion.button>
+            <motion.button
+              onClick={onPendingRequests}
+              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors"
+              title="Pending Requests"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <Users className="w-5 h-5" />
+            </motion.button>
             <motion.button
               onClick={onNewChat}
               className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"

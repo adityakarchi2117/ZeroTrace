@@ -1,5 +1,5 @@
 /**
- * Motion-enhanced components for CipherLink
+ * Motion-enhanced components for ZeroTrace
  * Re-exports from the motion system with app-specific defaults
  */
 

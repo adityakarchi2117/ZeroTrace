@@ -43,7 +43,7 @@ export default function AuthScreen() {
             <div className="w-12 h-12 bg-gradient-to-br from-cipher-primary to-cipher-secondary rounded-xl flex items-center justify-center">
               <Lock className="w-6 h-6 text-white" />
             </div>
-            <span className="text-2xl font-bold gradient-text">CipherLink</span>
+            <span className="text-2xl font-bold gradient-text">ZeroTrace</span>
           </div>
           
           <h1 className="text-4xl font-bold text-white mb-4">
@@ -90,7 +90,7 @@ export default function AuthScreen() {
             <div className="w-10 h-10 bg-gradient-to-br from-cipher-primary to-cipher-secondary rounded-xl flex items-center justify-center">
               <Lock className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold gradient-text">CipherLink</span>
+            <span className="text-xl font-bold gradient-text">ZeroTrace</span>
           </div>
 
           <div className="glass rounded-2xl p-8">

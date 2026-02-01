@@ -1,5 +1,5 @@
 """
-CipherLink Cryptographic Utilities
+ZeroTrace Cryptographic Utilities
 Zero-knowledge server-side crypto operations
 
 Note: All actual encryption/decryption happens client-side.
@@ -22,11 +22,11 @@ from cryptography.exceptions import InvalidSignature
 
 
 class CryptoUtils:
-    """Server-side cryptographic utilities for CipherLink"""
+    """Server-side cryptographic utilities for ZeroTrace"""
     
     # Key derivation info strings
-    KDF_INFO_SESSION = b"CipherLink Session Key v1"
-    KDF_INFO_CHAIN = b"CipherLink Chain Key v1"
+    KDF_INFO_SESSION = b"ZeroTrace Session Key v1"
+    KDF_INFO_CHAIN = b"ZeroTrace Chain Key v1"
     
     @staticmethod
     def generate_random_bytes(length: int = 32) -> bytes:

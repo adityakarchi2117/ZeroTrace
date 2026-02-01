@@ -73,13 +73,18 @@ android {
 
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "com.repairapp"
+    namespace "com.cipherlink"
+    
+    buildFeatures {
+        buildConfig true
+    }
     defaultConfig {
-        applicationId "com.repairapp"
+        applicationId "com.cipherlink"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        missingDimensionStrategy 'react-native-camera', 'general'
     }
     signingConfigs {
         debug {
@@ -100,11 +105,6 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
-    }
-    
-    // Fix for react-native-camera missing dimension strategy
-    defaultConfig {
-        missingDimensionStrategy 'react-native-camera', 'general'
     }
 }
 

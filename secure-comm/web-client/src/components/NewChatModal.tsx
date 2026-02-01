@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { X, Search, UserPlus, Loader2, AlertCircle, MessageSquare } from 'lucide-react';
+import { friendApi, computeKeyFingerprintSync } from '@/lib/friendApi';
+import { X, Search, UserPlus, Loader2, AlertCircle, MessageSquare, UserCheck, Clock } from 'lucide-react';
 
 interface NewChatModalProps {
   isOpen: boolean;
@@ -17,6 +18,8 @@ interface SearchResult {
   public_key?: string;
   identity_key?: string;
   is_online?: boolean;
+  is_friend?: boolean;
+  has_pending_request?: boolean;
 }
 
 type SearchState = 'idle' | 'searching' | 'success' | 'error' | 'not_found';
@@ -27,17 +30,18 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
   const [searchState, setSearchState] = useState<SearchState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [addingUser, setAddingUser] = useState<number | null>(null);
+  const [sendingRequest, setSendingRequest] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const {
-    addContact,
     setCurrentConversation,
     searchUsers,
     loadContacts,
     loadConversations,
     conversations,
-    contacts
+    contacts,
+    publicKey
   } = useStore();
 
   // Focus input when modal opens
@@ -52,6 +56,7 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
       setSearchState('idle');
       setErrorMessage('');
       setAddingUser(null);
+      setSendingRequest(null);
     }
   }, [isOpen]);
 
@@ -75,7 +80,16 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
       if (results.length === 0) {
         setSearchState('not_found');
       } else {
-        setSearchResults(results);
+        // Enrich results with friend status
+        const enrichedResults = results.map(user => {
+          const isFriend = contacts.some(c => c.contact_username === user.username);
+          return {
+            ...user,
+            is_friend: isFriend,
+            has_pending_request: false // Will be updated if we check pending requests
+          };
+        });
+        setSearchResults(enrichedResults);
         setSearchState('success');
       }
     } catch (error: any) {
@@ -100,42 +114,57 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
         return;
       }
 
-      // Fetch user's public key to verify they exist and have keys
-      try {
-        const keyData = await api.getPublicKey(user.username);
-        if (!keyData.public_key) {
-          setErrorMessage(`${user.username} hasn't set up their encryption keys yet.`);
-          setAddingUser(null);
-          return;
-        }
-      } catch (keyError: any) {
-        // User might not have keys yet, but we can still add as contact
-        console.log('Key fetch failed, proceeding with contact addition:', keyError);
+      // Check if already a friend/contact
+      const isFriend = contacts.some(c => c.contact_username === user.username);
+
+      if (!isFriend) {
+        // Not a friend - they need to send a friend request first
+        setErrorMessage(`You must be friends with ${user.username} to chat. Send them a friend request first!`);
+        setAddingUser(null);
+        return;
       }
 
-      // Check if already a contact
-      const existingContact = contacts.find(c => c.contact_username === user.username);
-
-      if (!existingContact) {
-        // Add as contact first
-        await addContact(user.username);
-        // Reload contacts to get the updated list
-        await loadContacts();
-      }
-
-      // Reload conversations to ensure the new one appears
+      // They are friends, reload conversations and open chat
       await loadConversations();
-
-      // Set as current conversation and open chat
       setCurrentConversation(user.username);
-
-      // Close modal
       onClose();
     } catch (error: any) {
       console.error('Failed to start chat:', error);
       const message = error?.response?.data?.detail || 'Failed to start chat. Please try again.';
       setErrorMessage(message);
       setAddingUser(null);
+    }
+  };
+
+  // Send friend request
+  const handleSendFriendRequest = async (user: SearchResult) => {
+    if (!publicKey) {
+      setErrorMessage('Your encryption keys are not set up. Please refresh the page.');
+      return;
+    }
+
+    setSendingRequest(user.id);
+    setErrorMessage('');
+
+    try {
+      const fingerprint = computeKeyFingerprintSync(publicKey);
+      await friendApi.sendFriendRequest({
+        receiver_username: user.username,
+        sender_public_key_fingerprint: fingerprint,
+      });
+
+      // Update the result to show pending
+      setSearchResults(prev => 
+        prev.map(u => u.id === user.id ? { ...u, has_pending_request: true } : u)
+      );
+
+      setErrorMessage(`Friend request sent to ${user.username}!`);
+    } catch (error: any) {
+      console.error('Failed to send friend request:', error);
+      const message = error?.response?.data?.detail || 'Failed to send friend request. Please try again.';
+      setErrorMessage(message);
+    } finally {
+      setSendingRequest(null);
     }
   };
 
@@ -218,10 +247,18 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
             </div>
           )}
 
-          {/* General Error */}
-          {addingUser === null && errorMessage && searchState !== 'error' && (
-            <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {/* General Error/Success */}
+          {addingUser === null && sendingRequest === null && errorMessage && searchState !== 'error' && (
+            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+              errorMessage.includes('sent') 
+                ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+                : 'bg-red-500/10 border border-red-500/30 text-red-400'
+            }`}>
+              {errorMessage.includes('sent') ? (
+                <UserCheck className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              )}
               <span>{errorMessage}</span>
             </div>
           )}
@@ -268,6 +305,8 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
                 {searchResults.map((user) => {
                   const isExistingChat = conversations.some(c => c.username === user.username);
                   const isAdding = addingUser === user.id;
+                  const isSending = sendingRequest === user.id;
+                  const isFriend = user.is_friend || contacts.some(c => c.contact_username === user.username);
 
                   return (
                     <div
@@ -286,44 +325,72 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
                         <div>
                           <p className="font-medium text-white flex items-center gap-2">
                             {user.username}
-                            {isExistingChat && (
-                              <span className="text-xs px-1.5 py-0.5 bg-cipher-primary/20 text-cipher-primary rounded">
-                                Existing
+                            {isFriend && (
+                              <span className="text-xs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
+                                <UserCheck className="w-3 h-3" />
+                                Friend
+                              </span>
+                            )}
+                            {user.has_pending_request && !isFriend && (
+                              <span className="text-xs px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Pending
                               </span>
                             )}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {user.public_key ? 'Encryption ready' : 'User available'}
+                            {isFriend 
+                              ? 'You can chat with this user' 
+                              : user.has_pending_request 
+                                ? 'Friend request sent' 
+                                : 'Send friend request to chat'}
                           </p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleStartChat(user)}
-                        disabled={isAdding}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2
-                          ${isExistingChat
-                            ? 'bg-cipher-primary/20 text-cipher-primary hover:bg-cipher-primary/30'
-                            : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:opacity-90'
-                          }
-                          disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
-                        {isAdding ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Starting...</span>
-                          </>
-                        ) : isExistingChat ? (
-                          <>
-                            <MessageSquare className="w-4 h-4" />
-                            <span>Open</span>
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus className="w-4 h-4" />
-                            <span>Chat</span>
-                          </>
-                        )}
-                      </button>
+                      
+                      {/* Action Button */}
+                      {isFriend ? (
+                        <button
+                          onClick={() => handleStartChat(user)}
+                          disabled={isAdding}
+                          className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isAdding ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Opening...</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageSquare className="w-4 h-4" />
+                              <span>Chat</span>
+                            </>
+                          )}
+                        </button>
+                      ) : user.has_pending_request ? (
+                        <span className="px-4 py-2 rounded-lg text-sm font-medium bg-yellow-500/20 text-yellow-400 flex items-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          <span>Pending</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSendFriendRequest(user)}
+                          disabled={isSending}
+                          className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 bg-gradient-to-r from-cipher-primary to-cipher-secondary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSending ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Sending...</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-4 h-4" />
+                              <span>Add Friend</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   );
                 })}

@@ -81,7 +81,7 @@ export function buildCurrentMessageTheme(): MessageTheme {
 
     try {
         // Read accent color from appearance settings
-        const appearanceSettings = localStorage.getItem('cipherlink_appearance');
+        const appearanceSettings = localStorage.getItem('zerotrace_appearance');
         let accent: AccentColor = 'blue';
         if (appearanceSettings) {
             const parsed = JSON.parse(appearanceSettings);
@@ -125,8 +125,8 @@ export function getNeonRingStyle(theme: MessageTheme): React.CSSProperties | und
 }
 
 // Storage key for custom bubble style preference
-const BUBBLE_STYLE_KEY = 'cipherlink_bubble_style';
-const FONT_STYLE_KEY = 'cipherlink_font_style';
+const BUBBLE_STYLE_KEY = 'zerotrace_bubble_style';
+const FONT_STYLE_KEY = 'zerotrace_font_style';
 
 // Load saved bubble style preference
 export function loadBubbleStyle(): 'rounded' | 'glass' | 'neon' {

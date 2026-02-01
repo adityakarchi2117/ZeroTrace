@@ -76,8 +76,8 @@ CipherLink is a privacy-first messaging platform that implements Signal Protocol
 ### Automated Setup
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/cipherlink.git
-cd cipherlink
+git clone https://github.com/your-org/zerotrace.git
+cd zerotrace
 
 # Run automated setup
 python3 setup.py
@@ -180,7 +180,7 @@ docker-compose up --build
 ```bash
 # Database
 DATABASE_URL=sqlite:///./secure_comm.db
-# DATABASE_URL=postgresql://user:pass@localhost/cipherlink
+# DATABASE_URL=postgresql://user:pass@localhost/zerotrace
 
 # Security
 SECRET_KEY=your-secret-key-here
@@ -363,10 +363,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/your-org/cipherlink/issues)
-- **Security**: security@cipherlink.app
-- **General**: hello@cipherlink.app
+- **Issues**: [GitHub Issues](https://github.com/your-org/zerotrace/issues)
+- **Security**: security@zerotrace.app
+- **General**: hello@zerotrace.app
 
 ---
 
-**CipherLink** - Because privacy is not optional. 🔐
+**ZeroTrace** - Because privacy is not optional. 🔐

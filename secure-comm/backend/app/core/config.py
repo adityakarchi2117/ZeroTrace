@@ -35,14 +35,14 @@ def parse_env_list(env_value: str, default: List[str]) -> List[str]:
 
 class Settings(BaseSettings):
     # ============ Application ============
-    APP_NAME: str = "CipherLink"
+    APP_NAME: str = "ZeroTrace"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "production"
     
     # ============ API Settings ============
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "CipherLink API"
+    PROJECT_NAME: str = "ZeroTrace API"
     
     # ============ Security ============
     SECRET_KEY: str = Field(default="your-secret-key-here-change-in-production-use-openssl-rand-hex-32")
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # ============ Database ============
     # Defaults to SQLite for local dev, override with DATABASE_URL env var for PostgreSQL
-    DATABASE_URL: str = Field(default="sqlite:///./cipherlink_v3.db")
+    DATABASE_URL: str = Field(default="sqlite:///./zerotrace_v3.db")
     
     # ============ CORS - Env vars for configuration ============
     CORS_ORIGINS: str = Field(default="", description="Comma-separated or JSON list of allowed origins")

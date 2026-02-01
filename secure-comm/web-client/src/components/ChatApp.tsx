@@ -9,15 +9,19 @@ import Sidebar from './Sidebar';
 import ChatView from './ChatView';
 import NewChatModal from './NewChatModal';
 import SettingsModal from './SettingsModal';
+import AddFriendPanel from './AddFriendPanel';
+import PendingRequestsPanel from './PendingRequestsPanel';
 import { Lock, Menu, X } from 'lucide-react';
 
 export default function ChatApp() {
-  const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation } = useStore();
+  const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation, publicKey } = useStore();
   const { settings } = useAppearance();
   const { wallpaper } = settings;
   const [showSidebar, setShowSidebar] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showPendingRequests, setShowPendingRequests] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -78,6 +82,8 @@ export default function ChatApp() {
         <Sidebar
           onNewChat={() => setShowNewChat(true)}
           onSettings={() => setShowSettings(true)}
+          onAddFriend={() => setShowAddFriend(true)}
+          onPendingRequests={() => setShowPendingRequests(true)}
         />
       </motion.div>
 
@@ -152,6 +158,27 @@ export default function ChatApp() {
       {/* Modals */}
       <NewChatModal isOpen={showNewChat} onClose={() => setShowNewChat(false)} />
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <AddFriendPanel 
+        isOpen={showAddFriend} 
+        onClose={() => setShowAddFriend(false)} 
+        currentUserPublicKey={publicKey || ''}
+        onRequestSent={() => {
+          // Optionally refresh something after request sent
+        }}
+      />
+      <PendingRequestsPanel 
+        isOpen={showPendingRequests} 
+        onClose={() => setShowPendingRequests(false)} 
+        currentUserPublicKey={publicKey || ''}
+        onRequestAccepted={() => {
+          // Reload contacts after accepting a friend
+          loadContacts();
+          loadConversations();
+        }}
+        onRequestRejected={() => {
+          // Optionally refresh something
+        }}
+      />
 
       {/* Mobile Overlay */}
       <AnimatePresence>
@@ -192,7 +219,7 @@ function EmptyState() {
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.3 }}
       >
-        Welcome to CipherLink
+        Welcome to ZeroTrace
       </motion.h2>
       
       <motion.p

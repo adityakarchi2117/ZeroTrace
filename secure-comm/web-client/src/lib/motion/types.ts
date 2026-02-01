@@ -1,5 +1,5 @@
 /**
- * Type definitions for the CipherLink Motion System
+ * Type definitions for the ZeroTrace Motion System
  */
 
 export type AnimationType = 

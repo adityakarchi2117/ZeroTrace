@@ -1,5 +1,5 @@
 /**
- * CipherLink API Client
+ * ZeroTrace API Client
  * Handles all communication with the backend
  */
 

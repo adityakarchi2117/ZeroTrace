@@ -185,7 +185,7 @@ const Settings = () => {
 
           {/* About */}
           <div className="bg-slate-800 rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-100 mb-4">About CipherLink</h2>
+            <h2 className="text-lg font-semibold text-slate-100 mb-4">About ZeroTrace</h2>
             <div className="space-y-2 text-sm text-slate-400">
               <p>Version 1.0.0</p>
               <p>End-to-end encrypted messaging platform</p>

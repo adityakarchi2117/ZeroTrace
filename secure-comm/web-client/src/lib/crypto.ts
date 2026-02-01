@@ -1,5 +1,5 @@
 /**
- * CipherLink Client-Side Cryptography Module
+ * ZeroTrace Client-Side Cryptography Module
  * 
  * Implements end-to-end encryption using:
  * - X25519 for key exchange (ECDH)
@@ -468,8 +468,8 @@ export interface StoredKeys {
 }
 
 export const KeyStorage = {
-  STORAGE_KEY: 'cipherlink_keys',
-  SESSION_CACHE_KEY: 'cipherlink_sessions',
+  STORAGE_KEY: 'zerotrace_keys',
+  SESSION_CACHE_KEY: 'zerotrace_sessions',
 
   save(username: string, keys: StoredKeys): void {
     try {

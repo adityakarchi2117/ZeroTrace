@@ -50,8 +50,8 @@ export const fontSizeConfig: Record<FontSize, { base: string; small: string; xs:
   large: { base: 'text-lg', small: 'text-base', xs: 'text-sm' },
 };
 
-const STORAGE_KEY = 'cipherlink_appearance';
-const WALLPAPER_STORAGE_KEY = 'cipherlink_wallpaper';
+const STORAGE_KEY = 'zerotrace_appearance';
+const WALLPAPER_STORAGE_KEY = 'zerotrace_wallpaper';
 
 // Preset wallpapers (gradient patterns)
 export const presetWallpapers = [

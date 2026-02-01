@@ -1,5 +1,5 @@
 /**
- * CipherLink WebRTC Service - PRODUCTION READY v2
+ * ZeroTrace WebRTC Service - PRODUCTION READY v2
  * Complete rewrite with robust error handling, state management, and mobile support
  * 
  * Call State Machine:

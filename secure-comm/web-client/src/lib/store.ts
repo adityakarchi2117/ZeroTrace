@@ -1,11 +1,12 @@
 /**
- * CipherLink Global State Store
+ * ZeroTrace Global State Store
  * Uses Zustand for state management
  */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, User, Contact, Conversation, Message, CallLog } from './api';
+import { friendApi } from './friendApi';
 import {
   generateKeyPair,
   generateSigningKeyPair,
@@ -70,8 +71,9 @@ interface AppState extends AuthState, CryptoState, ChatState {
   setCurrentConversation: (username: string | null) => void;
   addContact: (username: string) => Promise<void>;
   searchUsers: (query: string) => Promise<Array<{ id: number; username: string }>>;
-  addIncomingMessage: (message: Message) => void;
+  addIncomingMessage: (message: Message) => Promise<void>;
   loadCallHistory: () => Promise<void>;
+  loadPendingRequests: () => Promise<void>;
 
   // Deletion actions
   deleteMessageForMe: (messageId: number, conversationUsername: string) => Promise<void>;
@@ -117,21 +119,23 @@ export const useStore = create<AppState>()(
         set({ isLoading: true, error: null });
         try {
           const response = await api.login(username, password);
+          // Set token for friend API as well
+          friendApi.setToken(response.access_token);
           let user = await api.getCurrentUser();
 
           // Sync settings from server
           if (user.settings) {
             try {
-              const existing = localStorage.getItem('cipherlink_appearance');
+              const existing = localStorage.getItem('zerotrace_appearance');
               const localSettings = existing ? JSON.parse(existing) : {};
               const newSettings = { ...localSettings, ...user.settings };
               const newValue = JSON.stringify(newSettings);
 
-              localStorage.setItem('cipherlink_appearance', newValue);
+              localStorage.setItem('zerotrace_appearance', newValue);
 
               // Dispatch proper StorageEvent for current window listeners
               window.dispatchEvent(new StorageEvent('storage', {
-                key: 'cipherlink_appearance',
+                key: 'zerotrace_appearance',
                 newValue: newValue,
                 storageArea: localStorage,
                 url: window.location.href
@@ -142,8 +146,8 @@ export const useStore = create<AppState>()(
           }
 
           // Store token
-          localStorage.setItem('cipherlink_token', response.access_token);
-          localStorage.setItem('cipherlink_username', username);
+          localStorage.setItem('zerotrace_token', response.access_token);
+          localStorage.setItem('zerotrace_username', username);
 
           // Load or generate keys
           let keys = KeyStorage.load(username);
@@ -302,9 +306,10 @@ export const useStore = create<AppState>()(
       logout: () => {
         wsManager.disconnect();
         (window as any)._wsHandlersRegistered = false;
-        localStorage.removeItem('cipherlink_token');
-        localStorage.removeItem('cipherlink_username');
+        localStorage.removeItem('zerotrace_token');
+        localStorage.removeItem('zerotrace_username');
         api.setToken(null);
+        friendApi.setToken(null);
 
         set({
           user: null,
@@ -332,20 +337,21 @@ export const useStore = create<AppState>()(
 
           // Setup handlers only once using a module-level flag
           const globalWindow = window as any;
-          if (!globalWindow._cipherlinkWsHandlersRegistered) {
+          if (!globalWindow._zerotraceWsHandlersRegistered) {
             setupWebSocketHandlers(get, set);
-            globalWindow._cipherlinkWsHandlersRegistered = true;
+            globalWindow._zerotraceWsHandlersRegistered = true;
             console.log('🔌 WebSocket handlers registered');
           }
         }
       },
 
       loadStoredAuth: async () => {
-        const token = localStorage.getItem('cipherlink_token');
-        const username = localStorage.getItem('cipherlink_username');
+        const token = localStorage.getItem('zerotrace_token');
+        const username = localStorage.getItem('zerotrace_username');
 
         if (token && username) {
           api.setToken(token);
+          friendApi.setToken(token);
           try {
             const user = await api.getCurrentUser();
 
@@ -400,8 +406,8 @@ export const useStore = create<AppState>()(
             return;
           } catch {
             // Token expired or invalid
-            localStorage.removeItem('cipherlink_token');
-            localStorage.removeItem('cipherlink_username');
+            localStorage.removeItem('zerotrace_token');
+            localStorage.removeItem('zerotrace_username');
           }
         }
       },
@@ -456,10 +462,35 @@ export const useStore = create<AppState>()(
 
       loadContacts: async () => {
         try {
-          const contacts = await api.getContacts();
+          // Load trusted contacts from friend system (primary source)
+          const trustedContacts = await friendApi.getTrustedContacts();
+          
+          // Map trusted contacts to the Contact interface
+          const contacts: Contact[] = trustedContacts.map(tc => ({
+            id: tc.id,
+            user_id: tc.user_id,
+            contact_id: tc.contact_user_id,
+            contact_username: tc.contact_username,
+            contact_email: '', // Not available in TrustedContact
+            public_key: tc.public_key,
+            identity_key: tc.identity_key,
+            nickname: tc.nickname,
+            is_blocked: false, // Blocked users are separate
+            is_verified: tc.is_verified,
+            added_at: tc.created_at,
+          }));
+          
           set({ contacts });
+          console.log(`✅ Loaded ${contacts.length} trusted contacts`);
         } catch (error) {
           console.error('Failed to load contacts:', error);
+          // Fallback to old contacts API if friend system fails
+          try {
+            const contacts = await api.getContacts();
+            set({ contacts });
+          } catch (fallbackError) {
+            console.error('Fallback contacts load also failed:', fallbackError);
+          }
         }
       },
 
@@ -506,11 +537,21 @@ export const useStore = create<AppState>()(
           const { privateKey, contacts, user } = get();
 
           if (privateKey) {
-            // Decrypt ALL messages from server response that need it
-            // Using Promise.all isn't strictly necessary since decryptMessage is sync,
-            // but we can wrap it in a timeout to yield to main thread if needed.
-            // For now, we just proceed.
+            // Fetch the contact's public key from server to use as fallback
+            // This ensures decryption works even if contacts aren't loaded yet
+            let contactPublicKey: string | undefined;
+            try {
+              const keyData = await api.getPublicKey(username);
+              contactPublicKey = keyData.public_key;
+              console.log(`📥 Got public key for ${username}:`, contactPublicKey?.substring(0, 30));
+            } catch (e) {
+              console.warn(`Could not fetch public key for ${username}:`, e);
+              // Fall back to contacts array
+              const contact = contacts.find(c => c.contact_username === username);
+              contactPublicKey = contact?.public_key;
+            }
 
+            // Decrypt ALL messages from server response that need it
             for (const msg of messages) {
               // Only decrypt if we haven't already
               if (msg.encrypted_content && !msg._decryptedContent) {
@@ -522,16 +563,11 @@ export const useStore = create<AppState>()(
                   let fallbackPublicKey: string | undefined;
 
                   if (msg.sender_username === user?.username) {
-                    // Sent by me -> fallback is recipient's public key
-                    fallbackPublicKey = contacts.find(
-                      c => c.contact_username === msg.recipient_username
-                    )?.public_key;
+                    // Sent by me -> fallback is recipient's public key (the contact we're chatting with)
+                    fallbackPublicKey = contactPublicKey;
                   } else {
-                    // Received by me -> fallback is sender's public key
-                    const contact = contacts.find(
-                      c => c.contact_username === msg.sender_username
-                    );
-                    fallbackPublicKey = contact?.public_key;
+                    // Received by me -> fallback is sender's public key (the contact we're chatting with)
+                    fallbackPublicKey = contactPublicKey;
                   }
 
                   // decryptMessage handles v2 (embedded key) and v1 (fallback key)
@@ -579,10 +615,29 @@ export const useStore = create<AppState>()(
       sendMessage: async (recipientUsername: string, content: string, messageType: string = 'text', fileData?: any) => {
         console.log('📤 sendMessage called:', { recipientUsername, content: content.substring(0, 50), messageType });
 
-        let { privateKey, publicKey, user } = get();
+        let { privateKey, publicKey, user, contacts } = get();
         if (!privateKey || !publicKey || !user) {
           console.error('Cannot send message: missing keys or user', { hasPrivateKey: !!privateKey, hasPublicKey: !!publicKey, hasUser: !!user });
           return;
+        }
+
+        // Check if recipient is a trusted contact (friend)
+        let isFriend = contacts.some(c => c.contact_username === recipientUsername && !c.is_blocked);
+        
+        // If not found in local state, try refreshing contacts from server
+        // This handles cases where friend request was just accepted
+        if (!isFriend) {
+          console.log('🔄 Friend not found in local state, refreshing contacts from server...');
+          await get().loadContacts();
+          // Re-check with fresh data
+          const freshContacts = get().contacts;
+          isFriend = freshContacts.some(c => c.contact_username === recipientUsername && !c.is_blocked);
+          console.log('🔄 After refresh - isFriend:', isFriend, 'contacts:', freshContacts.map(c => c.contact_username));
+        }
+        
+        if (!isFriend) {
+          console.error('❌ Cannot send message: Not friends with', recipientUsername);
+          throw new Error('You must be friends with this user to send messages. Send a friend request first.');
         }
 
         // CRITICAL: Verify our key pair is valid before sending
@@ -768,7 +823,7 @@ export const useStore = create<AppState>()(
         }
       },
 
-      addIncomingMessage: (message: Message) => {
+      addIncomingMessage: async (message: Message) => {
         const state = get();
         const senderUsername = message.sender_username;
         // Check if message already exists
@@ -783,11 +838,24 @@ export const useStore = create<AppState>()(
             try {
               const encryptedData = JSON.parse(message.encrypted_content) as EncryptedMessage;
 
-              // Get fallback public key from contacts (for v1 messages)
+              // Get fallback public key - first try contacts, then fetch from server
+              let fallbackPublicKey = '';
               const contact = contacts.find(
                 c => c.contact_username === message.sender_username
               );
-              const fallbackPublicKey = contact?.public_key || '';
+              
+              if (contact?.public_key) {
+                fallbackPublicKey = contact.public_key;
+              } else if (!encryptedData.senderPublicKey) {
+                // v1 message needs fallback key - try to fetch from server
+                try {
+                  const keyData = await api.getPublicKey(message.sender_username);
+                  fallbackPublicKey = keyData.public_key || '';
+                  console.log('📥 Fetched sender public key for decryption:', fallbackPublicKey?.substring(0, 30));
+                } catch (e) {
+                  console.warn('Could not fetch sender public key:', e);
+                }
+              }
 
               // decryptMessage handles v2 (uses embedded senderPublicKey) and v1 (uses fallback)
               message._decryptedContent = decryptMessage(
@@ -864,6 +932,16 @@ export const useStore = create<AppState>()(
           set({ callHistory: history });
         } catch (error) {
           console.error('Failed to load call history:', error);
+        }
+      },
+
+      loadPendingRequests: async () => {
+        try {
+          const pending = await friendApi.getPendingRequests();
+          console.log('📋 Pending friend requests:', pending);
+          // Could store this in state if needed
+        } catch (error) {
+          console.error('Failed to load pending requests:', error);
         }
       },
 
@@ -1140,7 +1218,7 @@ export const useStore = create<AppState>()(
           }
 
           // Load messages for all conversations
-          const { user } = get();
+          const { user, privateKey, contacts: loadedContacts } = get();
           if (user) {
             const messagesMap = new Map();
             for (const conv of storedConversations) {
@@ -1151,7 +1229,7 @@ export const useStore = create<AppState>()(
               );
 
               if (storedMessages.length > 0) {
-                const messages = storedMessages.map(msg => ({
+                const messages: Message[] = storedMessages.map(msg => ({
                   id: msg.id,
                   sender_id: msg.sender_id,
                   sender_username: msg.sender_username,
@@ -1168,6 +1246,30 @@ export const useStore = create<AppState>()(
                   expires_at: msg.expires_at,
                   file_metadata: msg.file_metadata
                 }));
+
+                // Decrypt messages if we have a private key
+                if (privateKey) {
+                  // Get public key from conversation or contacts
+                  let contactPublicKey = conv.public_key;
+                  if (!contactPublicKey) {
+                    const contact = loadedContacts.find(c => c.contact_username === conv.username);
+                    contactPublicKey = contact?.public_key;
+                  }
+
+                  for (const msg of messages) {
+                    if (msg.encrypted_content && !msg._decryptedContent) {
+                      try {
+                        const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
+                        const decrypted = decryptMessage(encryptedData, contactPublicKey || '', privateKey);
+                        msg._decryptedContent = decrypted;
+                      } catch (e) {
+                        // Silent fail - will be retried during sync
+                        msg._decryptedContent = null;
+                      }
+                    }
+                  }
+                }
+
                 messagesMap.set(conv.username, messages);
               }
             }
@@ -1192,7 +1294,7 @@ export const useStore = create<AppState>()(
           const allConversationsData = await api.getAllConversationsWithMessages();
 
           // Update local storage with server data
-          const { user, contacts, conversations } = get();
+          const { user, contacts, conversations, privateKey } = get();
           if (user) {
             // Save conversations to IndexedDB
             const storedConversations: StoredConversation[] = conversations.map(conv => ({
@@ -1245,9 +1347,36 @@ export const useStore = create<AppState>()(
               await localStorageManager.saveMessages(storedMessages);
             }
 
-            // Update in-memory state
+            // Update in-memory state WITH decryption
             const messagesMap = new Map();
             for (const [username, messages] of Object.entries(allConversationsData)) {
+              // Decrypt messages if we have a private key
+              if (privateKey) {
+                // Fetch public key for this contact
+                let contactPublicKey: string | undefined;
+                try {
+                  const keyData = await api.getPublicKey(username);
+                  contactPublicKey = keyData.public_key;
+                } catch (e) {
+                  // Fallback to contacts array
+                  const contact = contacts.find(c => c.contact_username === username);
+                  contactPublicKey = contact?.public_key;
+                }
+
+                // Decrypt each message
+                for (const msg of (messages as Message[])) {
+                  if (msg.encrypted_content && !msg._decryptedContent) {
+                    try {
+                      const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
+                      const decrypted = decryptMessage(encryptedData, contactPublicKey || '', privateKey);
+                      msg._decryptedContent = decrypted;
+                    } catch (e) {
+                      console.warn('Failed to decrypt message during sync:', msg.id, e);
+                      msg._decryptedContent = '[Decryption Failed]';
+                    }
+                  }
+                }
+              }
               messagesMap.set(username, messages);
             }
             set({ messages: messagesMap });
@@ -1320,7 +1449,7 @@ export const useStore = create<AppState>()(
       },
     }),
     {
-      name: 'cipherlink-store',
+      name: 'zerotrace-store',
       partialize: (state) => ({
         // Only persist non-sensitive data
         currentConversation: state.currentConversation,
@@ -1441,6 +1570,35 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     if (senderUsername) {
       get().handleRemoteDeleteConversation(senderUsername);
     }
+  });
+
+  // Handle incoming friend request
+  wsManager.on('friend_request', (data) => {
+    console.log('📨 New friend request received:', data);
+    // Refresh pending requests to show the new request
+    get().loadPendingRequests?.();
+  });
+
+  // Handle friend request accepted
+  wsManager.on('friend_request_accepted', (data) => {
+    console.log('✅ Friend request accepted:', data);
+    const accepterUsername = data.accepter_username || data.data?.accepter_username;
+    
+    // Show notification
+    console.log(`🎉 ${accepterUsername} accepted your friend request!`);
+    
+    // Refresh contacts to show the new contact in sidebar
+    get().loadContacts();
+    
+    // Also refresh conversations
+    get().loadConversations();
+  });
+
+  // Handle friend request rejected
+  wsManager.on('friend_request_rejected', (data) => {
+    console.log('❌ Friend request rejected:', data);
+    // Refresh pending requests
+    get().loadPendingRequests?.();
   });
 }
 

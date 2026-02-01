@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from app.db.database import get_db
+from app.db.database import get_db, User
 from app.services.message_service import MessageService
 from app.api.routes.auth import oauth2_scheme
 from app.core.security import decode_access_token
 from app.models.message import MessageCreate, MessageResponse, CallLogResponse
 from app.api.websocket import manager
+from app.db.friend_repo import FriendRepository
 
 router = APIRouter()
 
@@ -22,6 +23,19 @@ async def send_message(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     
     sender_id = payload.get("user_id")
+    
+    # Check if users are trusted contacts (friend request accepted)
+    recipient = db.query(User).filter(User.username == message.recipient_username).first()
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient not found")
+    
+    friend_repo = FriendRepository(db)
+    if not friend_repo.is_mutual_contact(sender_id, recipient.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be friends with this user to send messages. Send a friend request first."
+        )
+    
     message_service = MessageService(db)
     
     new_message = message_service.send_message(

@@ -1,5 +1,5 @@
 /**
- * CipherLink WebSocket Manager
+ * ZeroTrace WebSocket Manager
  * Handles real-time messaging, presence, and call signaling
  */
 

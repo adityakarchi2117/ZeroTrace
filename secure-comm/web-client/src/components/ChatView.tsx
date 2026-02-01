@@ -102,7 +102,7 @@ export default function ChatView() {
   const {
     user, currentConversation, messages, contacts, conversations,
     privateKey, sendMessage, onlineUsers, typingUsers,
-    setCurrentConversation, loadCallHistory, callHistory,
+    setCurrentConversation, loadCallHistory, callHistory, loadContacts,
     deleteMessageForMe, deleteMessageForEveryone, clearChat, deleteConversationForEveryone
   } = useStore();
 
@@ -116,6 +116,7 @@ export default function ChatView() {
   const [isSending, setIsSending] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   // Use the new WebRTC hook
   const {
     callState,
@@ -165,6 +166,7 @@ export default function ChatView() {
 
   const contact = contacts.find(c => c.contact_username === currentConversation);
   const conversation = conversations.find(c => c.username === currentConversation);
+  const isFriend = contact && !contact.is_blocked;
 
   const partnerId = contact?.contact_id || conversation?.user_id;
   const partnerKey = contact?.public_key || conversation?.public_key;
@@ -206,6 +208,15 @@ export default function ChatView() {
     }
     fetchPublicKey();
   }, [currentConversation, partnerKey]);
+
+  // Refresh contacts when conversation changes and contact is not found
+  // This handles cases where friend request was just accepted
+  useEffect(() => {
+    if (currentConversation && !contact) {
+      console.log('🔄 Contact not found for conversation, refreshing contacts...');
+      loadContacts();
+    }
+  }, [currentConversation, contact, loadContacts]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -297,6 +308,7 @@ export default function ChatView() {
     if (!newMessage.trim() || !currentConversation || isSending) return;
 
     setIsSending(true);
+    setSendError(null);
     try {
       // Track this as a new message for animation
       const tempId = Date.now();
@@ -315,8 +327,9 @@ export default function ChatView() {
           return next;
         });
       }, 1000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send message:', error);
+      setSendError(error.message || 'Failed to send message');
     } finally {
       setIsSending(false);
     }
@@ -406,31 +419,37 @@ export default function ChatView() {
 
     try {
       const encrypted = JSON.parse(msg.encrypted_content) as EncryptedMessage;
+      
+      // For v2 messages, the sender's public key is embedded
+      // For v1 messages, we need the fallback key from the contact
+      // The contact we're chatting with is the one whose key we need for both sent/received
       let fallbackPublicKey: string | undefined;
-
-      if (msg.sender_username === user?.username) {
-        fallbackPublicKey =
-          contact?.public_key || conversation?.public_key || contactPublicKey || undefined;
-        if (!encrypted.senderPublicKey && !fallbackPublicKey) {
-          return '[Sent message]';
-        }
+      
+      // Try all available sources for the public key
+      fallbackPublicKey = contactPublicKey || contact?.public_key || conversation?.public_key;
+      
+      // v2 messages have embedded sender key, so fallback is less critical
+      if (encrypted.senderPublicKey) {
+        // v2: Use embedded key, fallback is just a safety net
+        const decrypted = decryptMessage(encrypted, fallbackPublicKey || '', privateKey);
+        if (decrypted) return decrypted;
       } else {
-        fallbackPublicKey =
-          contact?.public_key || conversation?.public_key || contactPublicKey || undefined;
-        if (!encrypted.senderPublicKey && !fallbackPublicKey) {
+        // v1: Must have fallback key
+        if (!fallbackPublicKey) {
+          if (msg.sender_username === user?.username) {
+            return '[Sent message]';
+          }
           return '[Key not available]';
         }
+        const decrypted = decryptMessage(encrypted, fallbackPublicKey, privateKey);
+        if (decrypted) return decrypted;
       }
 
-      const decrypted = decryptMessage(encrypted, fallbackPublicKey || '', privateKey);
-
-      if (!decrypted) {
-        if (msg.sender_username === user?.username) {
-          return '[Sent message]';
-        }
-        return '[Decryption failed]';
+      // Decryption failed
+      if (msg.sender_username === user?.username) {
+        return '[Sent message]';
       }
-      return decrypted;
+      return '[Decryption failed]';
     } catch (err) {
       console.error('Decryption error:', err);
       return '[Encrypted message]';
@@ -1011,6 +1030,24 @@ export default function ChatView() {
         <div ref={messagesEndRef} />
       </div >
 
+      {/* Send Error Display */}
+      {sendError && (
+        <motion.div
+          className="mx-4 mb-2 p-3 bg-red-900/50 border border-red-500/50 rounded-lg text-red-200 text-sm flex items-center justify-between"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 10 }}
+        >
+          <span>{sendError}</span>
+          <button
+            onClick={() => setSendError(null)}
+            className="ml-2 text-red-400 hover:text-red-200"
+          >
+            ×
+          </button>
+        </motion.div>
+      )}
+
       {/* Message Input */}
       < motion.div
         className="p-4 border-t border-gray-800 bg-cipher-dark/50"
@@ -1018,6 +1055,16 @@ export default function ChatView() {
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
       >
+        {!isFriend ? (
+          <div className="text-center py-4">
+            <div className="text-gray-400 mb-2">
+              You must be friends with <span className="text-white font-medium">{currentConversation}</span> to send messages.
+            </div>
+            <div className="text-sm text-gray-500">
+              Send a friend request to start chatting securely.
+            </div>
+          </div>
+        ) : (
         <div className="flex items-end gap-3">
           <div className="relative">
             <motion.button
@@ -1129,6 +1176,7 @@ export default function ChatView() {
             )}
           </motion.button>
         </div>
+        )}
       </motion.div >
 
       {/* Info Panel */}
@@ -1335,7 +1383,7 @@ export default function ChatView() {
               </motion.div>
               <div className="h-20 flex items-center justify-center pb-4">
                 <motion.button
-                  onClick={() => handleDownload(previewImage, 'cipherlink_image.png')}
+                  onClick={() => handleDownload(previewImage, 'zerotrace_image.png')}
                   className="flex items-center gap-2 px-6 py-2 text-white rounded-full hover:opacity-90 transition-colors"
                   style={{ background: accentGradient }}
                   whileHover={{ scale: 1.05 }}

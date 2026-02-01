@@ -1,6 +1,6 @@
-# CipherLink Motion System
+# ZeroTrace Motion System
 
-A premium, GPU-accelerated 3D animation system for the CipherLink secure messenger. Built with Framer Motion, GSAP, and React Three Fiber.
+A premium, GPU-accelerated 3D animation system for the ZeroTrace secure messenger. Built with Framer Motion, GSAP, and React Three Fiber.
 
 ## Features
 
@@ -222,4 +222,4 @@ Target metrics on mid-range devices:
 
 ## License
 
-Part of CipherLink - Private by Design, Secure by Default.
+Part of ZeroTrace - Private by Design, Secure by Default.

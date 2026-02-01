@@ -13,10 +13,13 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 
 import { colors } from '../../theme/colors';
 import { useAuthStore } from '../../store/authStore';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { TiltAvatar } from '../../components/motion/TiltAvatar';
+import { Glassmorphism, GlassCard } from '../../components/motion/Glassmorphism';
 
 type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -45,26 +48,44 @@ const LoginScreen: React.FC = () => {
     navigation.navigate('Register');
   };
 
+  // Animated scale for inputs
+  const inputScale = useSharedValue(1);
+  
+  const animatedInputStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: inputScale.value }],
+  }));
+
+  const handleFocus = () => {
+    inputScale.value = withSpring(1.02, { damping: 15 });
+  };
+
+  const handleBlur = () => {
+    inputScale.value = withSpring(1, { damping: 15 });
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Logo Section */}
+        {/* Logo Section with 3D Tilt */}
         <View style={styles.logoSection}>
-          <View style={styles.logoContainer}>
+          <TiltAvatar style={styles.logoContainer} maxTilt={15} scale={1.1}>
             <View style={styles.logoBackground}>
-              <Icon name="lock-closed" size={32} color={colors.primary.main} />
+              <Icon name="lock-closed" size={40} color={colors.primary.main} />
             </View>
-          </View>
+          </TiltAvatar>
           <Text style={styles.title}>CipherLink</Text>
           <Text style={styles.subtitle}>Private by design. Secure by default.</Text>
         </View>
 
-        {/* Form Section */}
-        <View style={styles.formSection}>
-          <View style={styles.inputContainer}>
+        {/* Form Section with Glassmorphism */}
+        <GlassCard style={styles.formCard}>
+          <Text style={styles.formTitle}>Welcome Back</Text>
+          <Text style={styles.formSubtitle}>Sign in to access your encrypted messages</Text>
+
+          <Animated.View style={[styles.inputContainer, animatedInputStyle]}>
             <Icon name="person-outline" size={20} color={colors.text.muted} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
@@ -75,10 +96,12 @@ const LoginScreen: React.FC = () => {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="next"
+              onFocus={handleFocus}
+              onBlur={handleBlur}
             />
-          </View>
+          </Animated.View>
 
-          <View style={styles.inputContainer}>
+          <Animated.View style={[styles.inputContainer, animatedInputStyle]}>
             <Icon name="lock-closed-outline" size={20} color={colors.text.muted} style={styles.inputIcon} />
             <TextInput
               style={[styles.input, styles.passwordInput]}
@@ -89,6 +112,8 @@ const LoginScreen: React.FC = () => {
               secureTextEntry={!showPassword}
               returnKeyType="done"
               onSubmitEditing={handleLogin}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
             />
             <TouchableOpacity
               style={styles.eyeIcon}
@@ -100,7 +125,7 @@ const LoginScreen: React.FC = () => {
                 color={colors.text.muted}
               />
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           <TouchableOpacity
             style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
@@ -110,27 +135,28 @@ const LoginScreen: React.FC = () => {
             <Text style={styles.loginButtonText}>
               {isLoading ? 'Signing In...' : 'Sign In'}
             </Text>
+            <Icon name="arrow-forward" size={18} color={colors.text.inverse} style={styles.buttonIcon} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.forgotPassword}>
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
           </TouchableOpacity>
-        </View>
+        </GlassCard>
 
-        {/* Security Features */}
+        {/* Security Features with Glassmorphism */}
         <View style={styles.featuresSection}>
-          <View style={styles.feature}>
-            <Icon name="shield-checkmark" size={16} color={colors.status.success} />
+          <Glassmorphism style={styles.featureCard} blur="sm">
+            <Icon name="shield-checkmark" size={20} color={colors.status.success} />
             <Text style={styles.featureText}>End-to-end encryption</Text>
-          </View>
-          <View style={styles.feature}>
-            <Icon name="eye-off" size={16} color={colors.status.success} />
+          </Glassmorphism>
+          <Glassmorphism style={styles.featureCard} blur="sm">
+            <Icon name="eye-off" size={20} color={colors.status.success} />
             <Text style={styles.featureText}>Zero-knowledge server</Text>
-          </View>
-          <View style={styles.feature}>
-            <Icon name="key" size={16} color={colors.status.success} />
+          </Glassmorphism>
+          <Glassmorphism style={styles.featureCard} blur="sm">
+            <Icon name="key" size={20} color={colors.status.success} />
             <Text style={styles.featureText}>Perfect Forward Secrecy</Text>
-          </View>
+          </Glassmorphism>
         </View>
 
         {/* Register Link */}
@@ -157,20 +183,25 @@ const styles = StyleSheet.create({
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 40,
   },
   logoContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   logoBackground: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
+    width: 90,
+    height: 90,
+    borderRadius: 24,
     backgroundColor: colors.background.secondary,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border.primary,
+    shadowColor: colors.primary.main,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   title: {
     fontSize: 32,
@@ -183,13 +214,25 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
   },
-  formSection: {
-    marginBottom: 32,
+  formCard: {
+    marginBottom: 24,
+    padding: 24,
+  },
+  formTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  formSubtitle: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginBottom: 24,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background.secondary,
+    backgroundColor: colors.background.tertiary,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border.primary,
@@ -217,9 +260,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary.main,
     borderRadius: 12,
     height: 56,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 8,
+    shadowColor: colors.primary.main,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
   loginButtonDisabled: {
     opacity: 0.6,
@@ -228,6 +277,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text.inverse,
+  },
+  buttonIcon: {
+    marginLeft: 8,
   },
   forgotPassword: {
     alignItems: 'center',
@@ -238,17 +290,20 @@ const styles = StyleSheet.create({
     color: colors.primary.main,
   },
   featuresSection: {
-    marginBottom: 32,
+    marginBottom: 24,
+    gap: 8,
   },
-  feature: {
+  featureCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    padding: 12,
+    borderRadius: 10,
   },
   featureText: {
     fontSize: 14,
     color: colors.text.secondary,
-    marginLeft: 8,
+    marginLeft: 12,
+    fontWeight: '500',
   },
   registerSection: {
     flexDirection: 'row',

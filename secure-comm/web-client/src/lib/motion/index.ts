@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * CipherLink Motion System
+ * ZeroTrace Motion System
  * 
- * A premium 3D animation system for the CipherLink secure messenger.
+ * A premium 3D animation system for the ZeroTrace secure messenger.
  * Built with Framer Motion, GSAP, and React Three Fiber.
  * 
  * Features:

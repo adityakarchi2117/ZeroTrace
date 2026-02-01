@@ -7,10 +7,10 @@ import { MotionProvider } from '@/lib/motion';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'CipherLink - Private by Design',
-  description: '🔐 End-to-end encrypted messaging platform. Zero-knowledge server. Perfect Forward Secrecy.',
+  title: 'ZeroTrace - Private by Design',
+  description: '🔒 End-to-end encrypted messaging platform. Zero-knowledge server. Perfect Forward Secrecy.',
   keywords: ['encryption', 'privacy', 'messaging', 'secure', 'e2e', 'zero-knowledge'],
-  authors: [{ name: 'CipherLink Team' }],
+  authors: [{ name: 'ZeroTrace Team' }],
   icons: {
     icon: '/favicon.ico',
   },

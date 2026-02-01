@@ -8,6 +8,7 @@ from typing import Dict, Set, Optional
 from datetime import datetime
 from app.core.security import decode_access_token
 from app.db.database import SessionLocal, Message, User, MessageStatusEnum, MessageTypeEnum, ExpiryTypeEnum, CallLog, CallStatusEnum, CallTypeEnum
+from app.db.friend_repo import FriendRepository
 
 async def save_call_log(call_data: dict, status: str, end_time: datetime = None):
     try:
@@ -385,6 +386,17 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
         return
     
     recipient_id = recipient.id
+    
+    # Check if users are trusted contacts (friend request accepted)
+    friend_repo = FriendRepository(db)
+    if not friend_repo.is_mutual_contact(sender_id, recipient_id):
+        await manager.send_personal_message({
+            "type": "error",
+            "message": "You must be friends with this user to send messages. Send a friend request first."
+        }, sender_id)
+        db.close()
+        return
+    
     db.close()
     
     # Store message in database (ciphertext only)
@@ -834,3 +846,98 @@ async def update_message_status(message_id: int, status: MessageStatusEnum):
         db.close()
     except Exception as e:
         print(f"Error updating message status: {e}")
+
+
+# ============ Friend Request Notifications ============
+
+async def notify_friend_request(receiver_id: int, sender_username: str, request_id: int, sender_fingerprint: str):
+    """
+    Send real-time notification for new friend request
+    Called from the friends API when a request is created
+    """
+    notification = {
+        "type": "friend_request",
+        "request_id": request_id,
+        "sender_username": sender_username,
+        "sender_fingerprint": sender_fingerprint,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, receiver_id)
+    return delivered
+
+
+async def notify_friend_request_accepted(sender_id: int, accepter_username: str, contact_fingerprint: str):
+    """
+    Notify original sender that their friend request was accepted
+    """
+    notification = {
+        "type": "friend_request_accepted",
+        "accepter_username": accepter_username,
+        "contact_fingerprint": contact_fingerprint,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, sender_id)
+    return delivered
+
+
+async def notify_friend_request_rejected(sender_id: int, rejecter_username: str):
+    """
+    Notify original sender that their friend request was rejected
+    Note: We don't reveal rejection reason for privacy
+    """
+    notification = {
+        "type": "friend_request_rejected",
+        "username": rejecter_username,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, sender_id)
+    return delivered
+
+
+async def notify_contact_removed(user_id: int, removed_by_username: str):
+    """
+    Notify user that they were removed from someone's contacts
+    """
+    notification = {
+        "type": "contact_removed",
+        "removed_by": removed_by_username,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, user_id)
+    return delivered
+
+
+async def notify_key_changed(contact_user_id: int, changer_username: str, new_fingerprint: str):
+    """
+    Notify contact that a user's key has changed
+    Important for security - users should re-verify
+    """
+    notification = {
+        "type": "key_changed",
+        "username": changer_username,
+        "new_fingerprint": new_fingerprint,
+        "requires_verification": True,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, contact_user_id)
+    return delivered
+
+
+async def notify_blocked(blocked_user_id: int):
+    """
+    Notify user they've been blocked (minimal info for privacy)
+    We don't reveal who blocked them
+    """
+    notification = {
+        "type": "connection_status_changed",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, blocked_user_id)
+    return delivered
+
