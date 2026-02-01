@@ -15,6 +15,8 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { friendApi } from '@/lib/friendApi';
 
 interface SidebarProps {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onNewChat: () => void;
   onSettings: () => void;
   onAddFriend: () => void;
@@ -30,6 +32,8 @@ interface SearchResult {
 }
 
 export default function Sidebar({ 
+  collapsed = false,
+  onToggleCollapse,
   onNewChat, 
   onSettings, 
   onAddFriend, 
@@ -209,13 +213,13 @@ export default function Sidebar({
     <div className="h-full flex flex-col">
       {/* Header */}
       <motion.div 
-        className="p-4 border-b border-gray-800"
+        className={`p-4 border-b border-gray-800 ${collapsed ? 'p-2' : ''}`}
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
         {/* Header Row */}
-        <div className="flex items-center justify-between mb-3">
+        <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} mb-3`}>
           <div className="flex items-center gap-2">
             <motion.div 
               className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -225,37 +229,39 @@ export default function Sidebar({
             >
               <Lock className="w-4 h-4 text-white" />
             </motion.div>
-            <span className="font-bold text-white dark:text-white">ZeroTrace</span>
+            {!collapsed && <span className="font-bold text-white dark:text-white">ZeroTrace</span>}
           </div>
-          <div className="flex items-center gap-1">
-            <motion.button
-              onClick={onSettings}
-              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
-              title="Settings"
-              whileHover={{ scale: 1.1, rotate: 30 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Settings className="w-5 h-5" />
-            </motion.button>
-          </div>
+          {!collapsed && (
+            <div className="flex items-center gap-1">
+              <motion.button
+                onClick={onSettings}
+                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
+                title="Settings"
+                whileHover={{ scale: 1.1, rotate: 30 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <Settings className="w-5 h-5" />
+              </motion.button>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons Row */}
-        <div className="flex items-center justify-between bg-gray-800/30 rounded-lg p-1 mb-3">
+        <div className={`${collapsed ? 'flex flex-col gap-2' : 'flex items-center justify-between'} bg-gray-800/30 rounded-lg p-1 mb-3`}>
           <motion.button
             onClick={onAddFriend}
-            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors"
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors`}
             title="Add Friend"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
             <UserPlus className="w-4 h-4" />
-            <span className="text-[10px]">Add</span>
+            {!collapsed && <span className="text-[10px]">Add</span>}
           </motion.button>
           
           <motion.button
             onClick={onPendingRequests}
-            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative"
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative`}
             title="Pending Requests"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -264,7 +270,7 @@ export default function Sidebar({
               <Users className="w-4 h-4" />
               {pendingRequestCount > 0 && (
                 <motion.span
-                  className="absolute -top-2 -right-2 w-4 h-4 bg-yellow-500 text-black text-[9px] rounded-full flex items-center justify-center font-bold"
+                  className={`absolute -top-2 -right-2 w-4 h-4 bg-yellow-500 text-black text-[9px] rounded-full flex items-center justify-center font-bold ${collapsed ? 'w-3 h-3 text-[8px]' : ''}`}
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                 >
@@ -272,10 +278,10 @@ export default function Sidebar({
                 </motion.span>
               )}
             </div>
-            <span className="text-[10px]">Requests</span>
+            {!collapsed && <span className="text-[10px]">Requests</span>}
           </motion.button>
           
-          {onBlockedUsers && (
+          {!collapsed && onBlockedUsers && (
             <motion.button
               onClick={onBlockedUsers}
               className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
@@ -290,77 +296,84 @@ export default function Sidebar({
           
           <motion.button
             onClick={onNewChat}
-            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors"
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors`}
             title="New Chat"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
             <Plus className="w-4 h-4" />
-            <span className="text-[10px]">New</span>
+            {!collapsed && <span className="text-[10px]">New</span>}
           </motion.button>
           
-          <motion.button
-            onClick={refreshContacts}
-            disabled={isRefreshingContacts}
-            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
-            title="Refresh"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
-            <span className="text-[10px]">Refresh</span>
-          </motion.button>
+          {!collapsed && (
+            <motion.button
+              onClick={refreshContacts}
+              disabled={isRefreshingContacts}
+              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
+              title="Refresh"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
+              <span className="text-[10px]">Refresh</span>
+            </motion.button>
+          )}
         </div>
 
         {/* User Info with Tilt Avatar */}
-        <div className="flex items-center gap-3 p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg">
-          <MotionAvatar name={user?.username || 'U'} size="md" disableTilt />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-white truncate">{user?.username}</p>
-            <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-          </div>
-          <motion.button
-            onClick={logout}
-            className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
-            title="Logout"
-            whileHover={{ scale: 1.1, x: 2 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            <LogOut className="w-4 h-4" />
-          </motion.button>
+        <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg`}>
+          <MotionAvatar name={user?.username || 'U'} size={collapsed ? 'sm' : 'md'} disableTilt />
+          {!collapsed && (
+            <>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-white truncate">{user?.username}</p>
+                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+              </div>
+              <motion.button
+                onClick={logout}
+                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
+                title="Logout"
+                whileHover={{ scale: 1.1, x: 2 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <LogOut className="w-4 h-4" />
+              </motion.button>
+            </>
+          )}
         </div>
       </motion.div>
 
-      {/* Search */}
-      <motion.div 
-        className="p-4"
-        initial={{ y: -10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.1 }}
-      >
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Search users or conversations..."
-            value={searchQuery}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="w-full bg-cipher-darker border border-gray-700 rounded-lg py-2 pl-10 pr-10 text-sm text-white placeholder-gray-500 focus:border-cipher-primary transition-colors"
-          />
-          {searchQuery && (
-            <motion.button
-              onClick={clearSearch}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
-              whileHover={{ scale: 1.2, rotate: 90 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <X className="w-4 h-4" />
-            </motion.button>
-          )}
-          {isSearching && (
-            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cipher-primary animate-spin" />
-          )}
-        </div>
+      {/* Search - Hidden when collapsed */}
+      {!collapsed && (
+        <motion.div 
+          className="p-4"
+          initial={{ y: -10, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search users or conversations..."
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="w-full bg-cipher-darker border border-gray-700 rounded-lg py-2 pl-10 pr-10 text-sm text-white placeholder-gray-500 focus:border-cipher-primary transition-colors"
+            />
+            {searchQuery && (
+              <motion.button
+                onClick={clearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                whileHover={{ scale: 1.2, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <X className="w-4 h-4" />
+              </motion.button>
+            )}
+            {isSearching && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cipher-primary animate-spin" />
+            )}
+          </div>
 
         {/* Global Search Results */}
         <AnimatePresence>
@@ -424,26 +437,27 @@ export default function Sidebar({
           )}
         </AnimatePresence>
 
-        {/* No results message */}
-        <AnimatePresence>
-          {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
-            <motion.div 
-              className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <p className="text-sm text-gray-400">No users found for &quot;{searchQuery}&quot;</p>
-              <button
-                onClick={onNewChat}
-                className="mt-2 text-xs text-cipher-primary hover:underline"
+          {/* No results message */}
+          <AnimatePresence>
+            {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
+              <motion.div 
+                className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
               >
-                Try advanced search
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+                <p className="text-sm text-gray-400">No users found for &quot;{searchQuery}&quot;</p>
+                <button
+                  onClick={onNewChat}
+                  className="mt-2 text-xs text-cipher-primary hover:underline"
+                >
+                  Try advanced search
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      )}
 
       {/* Conversations List with Stagger Animation */}
       <motion.div 
@@ -476,7 +490,7 @@ export default function Sidebar({
             <p className="text-gray-400 text-sm">No conversations match &quot;{searchQuery}&quot;</p>
           </div>
         ) : (
-          <div className="space-y-1 p-2">
+          <div className={`space-y-1 ${collapsed ? 'p-1' : 'p-2'}`}>
             {filteredConversations.map((conv, index) => {
               const isActive = currentConversation === conv.username;
               const isOnline = onlineUsers.has(conv.user_id);
@@ -487,59 +501,74 @@ export default function Sidebar({
                   onClick={() => setCurrentConversation(conv.username)}
                   variants={motionVariants.listItem}
                   whileHover={{ 
-                    x: 4,
+                    x: collapsed ? 0 : 4,
+                    scale: collapsed ? 1.05 : 1,
                     backgroundColor: isActive ? undefined : 'rgba(255,255,255,0.05)',
                   }}
                   whileTap={{ scale: 0.98 }}
                   className={`
-                    w-full p-3 rounded-lg flex items-center gap-3 transition-colors
-                    ${isActive 
-                      ? 'bg-cipher-primary/20 border border-cipher-primary/30' 
-                      : 'hover:bg-gray-800'}
+                    w-full rounded-lg flex items-center transition-colors
+                    ${collapsed 
+                      ? `justify-center p-2 ${isActive ? 'bg-cipher-primary/30' : ''}` 
+                      : `p-3 gap-3 ${isActive 
+                        ? 'bg-cipher-primary/20 border border-cipher-primary/30' 
+                        : 'hover:bg-gray-800'}`}
                   `}
+                  title={collapsed ? conv.username : undefined}
                 >
                   <div className="relative flex-shrink-0">
                     <div 
-                      className={`w-12 h-12 rounded-full flex items-center justify-center ${!isActive ? 'bg-gray-700' : ''}`}
+                      className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full flex items-center justify-center ${!isActive ? 'bg-gray-700' : ''}`}
                       style={isActive ? { background: accentGradient } : undefined}
                     >
-                      <span className="text-white font-medium">
+                      <span className={`text-white font-medium ${collapsed ? 'text-sm' : ''}`}>
                         {conv.username.charAt(0).toUpperCase()}
                       </span>
                     </div>
                     {isOnline && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-cipher-dark online-indicator" />
+                      <div className={`absolute -bottom-0.5 -right-0.5 bg-green-500 rounded-full border-2 border-cipher-dark online-indicator ${collapsed ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
+                    )}
+                    {collapsed && conv.unread_count > 0 && (
+                      <motion.span 
+                        className="absolute -top-1 -right-1 bg-cipher-primary text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center"
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                      >
+                        {conv.unread_count > 9 ? '9+' : conv.unread_count}
+                      </motion.span>
                     )}
                   </div>
                   
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="flex items-center justify-between">
-                      <span className={`font-medium truncate ${isActive ? 'text-white' : 'text-gray-200'}`}>
-                        {conv.username}
-                      </span>
-                      <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
-                        {formatTime(conv.last_message_time)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-1 text-sm text-gray-400 truncate">
-                        <Shield className="w-3 h-3 text-cipher-primary flex-shrink-0" />
-                        <span className="truncate">
-                          {conv.last_message_preview || 'Start conversation'}
+                  {!collapsed && (
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="flex items-center justify-between">
+                        <span className={`font-medium truncate ${isActive ? 'text-white' : 'text-gray-200'}`}>
+                          {conv.username}
+                        </span>
+                        <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
+                          {formatTime(conv.last_message_time)}
                         </span>
                       </div>
-                      {conv.unread_count > 0 && (
-                        <motion.span 
-                          className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          transition={{ type: 'spring', stiffness: 500, damping: 15 }}
-                        >
-                          {conv.unread_count}
-                        </motion.span>
-                      )}
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center gap-1 text-sm text-gray-400 truncate">
+                          <Shield className="w-3 h-3 text-cipher-primary flex-shrink-0" />
+                          <span className="truncate">
+                            {conv.last_message_preview || 'Start conversation'}
+                          </span>
+                        </div>
+                        {conv.unread_count > 0 && (
+                          <motion.span 
+                            className="bg-cipher-primary text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2"
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+                          >
+                            {conv.unread_count}
+                          </motion.span>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </motion.button>
               );
             })}
@@ -549,15 +578,21 @@ export default function Sidebar({
 
       {/* Footer */}
       <motion.div 
-        className="p-4 border-t border-gray-800"
+        className={`p-4 border-t border-gray-800 ${collapsed ? 'p-2' : ''}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
       >
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <Lock className="w-3 h-3 text-cipher-primary" />
-          <span>End-to-end encrypted</span>
-        </div>
+        {collapsed ? (
+          <div className="flex justify-center">
+            <Lock className="w-4 h-4 text-cipher-primary" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Lock className="w-3 h-3 text-cipher-primary" />
+            <span>End-to-end encrypted</span>
+          </div>
+        )}
       </motion.div>
     </div>
   );

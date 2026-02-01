@@ -12,13 +12,14 @@ import SettingsModal from './SettingsModal';
 import AddFriendPanel from './AddFriendPanel';
 import PendingRequestsPanel from './PendingRequestsPanel';
 import BlockedUsersPanel from './BlockedUsersPanel';
-import { Lock, Menu, X } from 'lucide-react';
+import { Lock, Menu, X, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
 export default function ChatApp() {
   const { loadContacts, loadConversations, loadCallHistory, initializeWebSocket, currentConversation, publicKey } = useStore();
   const { settings } = useAppearance();
   const { wallpaper } = settings;
   const [showSidebar, setShowSidebar] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
@@ -39,6 +40,10 @@ export default function ChatApp() {
     return () => window.removeEventListener('resize', checkMobile);
   }, [loadContacts, loadConversations, loadCallHistory, initializeWebSocket]);
 
+  // On mobile, sidebar is completely hidden when closed
+  // On desktop, sidebar can be collapsed (narrow) or expanded
+  const sidebarWidth = isMobile ? 320 : (sidebarCollapsed ? 80 : 320);
+
   return (
     <div className="h-screen bg-cipher-darker flex overflow-hidden relative">
       {/* Background particles for premium feel */}
@@ -56,17 +61,37 @@ export default function ChatApp() {
         {showSidebar ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </motion.button>
 
+      {/* Desktop Sidebar Toggle - Shows when sidebar is open */}
+      <AnimatePresence>
+        {showSidebar && !isMobile && (
+          <motion.button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="hidden lg:flex fixed top-1/2 -translate-y-1/2 z-50 p-2 bg-cipher-dark border border-gray-700 rounded-r-lg text-gray-400 hover:text-white shadow-lg"
+            style={{ left: sidebarWidth - 1 }}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            whileHover={{ scale: 1.1, x: 2 }}
+            whileTap={{ scale: 0.95 }}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </motion.button>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar with 3D effect */}
       <motion.div
         className={`
           fixed lg:relative inset-y-0 left-0 z-40
-          w-80 bg-cipher-dark border-r border-gray-800
+          bg-cipher-dark border-r border-gray-800
           transform ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
         initial={false}
         animate={{
           x: showSidebar ? 0 : -320,
+          width: sidebarWidth,
           rotateY: showSidebar && !isMobile ? 0 : 5,
           scale: showSidebar ? 1 : 0.95,
         }}
@@ -82,6 +107,8 @@ export default function ChatApp() {
         }}
       >
         <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           onNewChat={() => setShowNewChat(true)}
           onSettings={() => setShowSettings(true)}
           onAddFriend={() => setShowAddFriend(true)}
