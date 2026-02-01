@@ -21,6 +21,7 @@ import {
 import { wsManager } from './websocket';
 import { localStorageManager, StoredMessage, StoredConversation, StoredContact } from './storage';
 import { buildCurrentMessageTheme } from './themeSync';
+import { playMessageSound, initAudioContext } from './sound';
 
 interface AuthState {
   user: User | null;
@@ -826,6 +827,8 @@ export const useStore = create<AppState>()(
       addIncomingMessage: async (message: Message) => {
         const state = get();
         const senderUsername = message.sender_username;
+        const currentConversation = get().currentConversation;
+        
         // Check if message already exists
         const currentMessages = get().messages.get(senderUsername) || [];
         const exists = currentMessages.some(m => m.id === message.id);
@@ -900,6 +903,19 @@ export const useStore = create<AppState>()(
             get().persistConversation(updatedConv).catch(err =>
               console.error('❌ Failed to persist conversation for incoming message:', err)
             );
+            
+            // Play notification sound
+            initAudioContext();
+            playMessageSound();
+            
+            // Show browser notification if not in current conversation
+            if (currentConversation !== senderUsername && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification(`New message from ${senderUsername}`, {
+                body: message._decryptedContent || 'New encrypted message',
+                icon: '/favicon.ico',
+                tag: `msg-${message.id}`,
+              });
+            }
           } else {
             // Message from user without an existing conversation entry – create a lightweight one
             const newConversation = {
@@ -922,6 +938,19 @@ export const useStore = create<AppState>()(
             get().persistConversation(newConversation).catch(err =>
               console.error('❌ Failed to persist new conversation for incoming message:', err)
             );
+            
+            // Play notification sound
+            initAudioContext();
+            playMessageSound();
+            
+            // Show browser notification
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`New message from ${senderUsername}`, {
+                body: message._decryptedContent || 'New encrypted message',
+                icon: '/favicon.ico',
+                tag: `msg-${message.id}`,
+              });
+            }
           }
         }
       },

@@ -36,6 +36,11 @@ export default function ChatApp() {
     loadConversations();
     loadCallHistory();
     initializeWebSocket();
+    
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
 
     // Detect mobile
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);

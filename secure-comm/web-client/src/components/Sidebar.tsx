@@ -8,8 +8,9 @@ import { MotionAvatar } from '@/components/motion';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
   Shield, User as UserIcon, Loader2, UserPlus, X, Users,
-  ShieldBan, RefreshCw, Bell
+  ShieldBan, RefreshCw, Bell, Volume2, VolumeX
 } from 'lucide-react';
+import { getSoundEnabled, setSoundEnabled, loadSoundSettings } from '@/lib/sound';
 import { format, isToday, isYesterday } from 'date-fns';
 import { friendApi } from '@/lib/friendApi';
 
@@ -125,6 +126,12 @@ export default function Sidebar({
     setCurrentConversation, logout, onlineUsers,
     searchUsers, addContact, loadContacts, loadConversations, contacts
   } = useStore();
+  
+  // Sound enabled state
+  const [soundEnabled, setSoundEnabledState] = useState(() => {
+    loadSoundSettings();
+    return getSoundEnabled();
+  });
 
   // Appearance settings
   const { getAccentGradient, settings } = useAppearance();
@@ -219,6 +226,13 @@ export default function Sidebar({
   const isUserOnline = useCallback((userId: number) => {
     return onlineUsers.has(userId);
   }, [onlineUsers]);
+  
+  // Toggle sound
+  const toggleSound = useCallback(() => {
+    const newValue = !soundEnabled;
+    setSoundEnabled(newValue);
+    setSoundEnabledState(newValue);
+  }, [soundEnabled]);
 
   // Search for users globally when typing
   const handleSearchChange = async (value: string) => {
@@ -313,6 +327,13 @@ export default function Sidebar({
           </div>
           {!collapsed && (
             <div className="flex items-center gap-1">
+              <button
+                onClick={toggleSound}
+                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
+                title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}
+              >
+                {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              </button>
               <button
                 onClick={onPendingRequests}
                 className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors relative"
