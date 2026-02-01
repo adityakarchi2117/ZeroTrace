@@ -82,3 +82,10 @@ htmlcov/
 # Build artifacts
 *.tar.gz
 *.zip
+
+# Next.js build output
+.next/
+out/
+
+# Local folders
+.local/
