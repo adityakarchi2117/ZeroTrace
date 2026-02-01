@@ -163,6 +163,58 @@ class PendingRequestsResponse(BaseModel):
     total_outgoing: int
 
 
+# ============ Notification Models ============
+
+class NotificationType(str, Enum):
+    """Types of notifications"""
+    FRIEND_REQUEST = "friend_request"
+    FRIEND_REQUEST_ACCEPTED = "friend_request_accepted"
+    FRIEND_REQUEST_REJECTED = "friend_request_rejected"
+    CONTACT_REMOVED = "contact_removed"
+    USER_BLOCKED = "user_blocked"
+    USER_UNBLOCKED = "user_unblocked"
+    KEY_CHANGED = "key_changed"
+    CONTACT_VERIFIED = "contact_verified"
+    SYSTEM = "system"
+
+
+class NotificationResponse(BaseModel):
+    """Response model for notification"""
+    id: int
+    notification_type: NotificationType
+    title: str
+    message: Optional[str] = None
+    payload: Optional[dict] = None
+    related_user_id: Optional[int] = None
+    related_username: Optional[str] = None
+    is_read: bool
+    is_delivered: bool
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationCountResponse(BaseModel):
+    """Response model for notification counts"""
+    total: int
+    unread: int
+    friend_requests: int
+    security_alerts: int
+
+
+class UnfriendRequest(BaseModel):
+    """Unfriend a user"""
+    user_id: int
+    revoke_keys: bool = Field(True, description="Whether to revoke shared encryption keys")
+
+
+class UnfriendResponse(BaseModel):
+    """Response for unfriend action"""
+    success: bool
+    message: str
+    keys_revoked: bool
+
+
 # ============ Helper Functions ============
 
 def compute_key_fingerprint(public_key: str) -> str:

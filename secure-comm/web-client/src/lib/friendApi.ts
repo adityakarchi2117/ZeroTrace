@@ -17,6 +17,9 @@ import {
   RejectFriendRequestData,
   BlockUserData,
   VerifyContactData,
+  Notification,
+  NotificationCount,
+  BlockReason,
 } from './friendTypes';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -145,14 +148,35 @@ class FriendApiClient {
     return response.data;
   }
 
+  // ============ Unfriend ============
+
+  /**
+   * Unfriend a user with full cleanup
+   * @param userId The user ID to unfriend
+   * @param revokeKeys Whether to revoke shared encryption keys
+   */
+  async unfriendUser(userId: number, revokeKeys: boolean = true): Promise<{ success: boolean; message: string; keys_revoked: boolean }> {
+    const response = await this.client.post('/api/friend/unfriend', {
+      user_id: userId,
+      revoke_keys: revokeKeys,
+    });
+    return response.data;
+  }
+
   // ============ Block Management ============
 
   /**
    * Block a user
-   * @param data Block data including user ID and reason
+   * @param userId The user ID to block
+   * @param reason The reason for blocking
+   * @param additionalInfo Optional additional info
    */
-  async blockUser(data: BlockUserData): Promise<void> {
-    await this.client.post('/api/friend/block', data);
+  async blockUser(userId: number, reason: BlockReason = 'other', additionalInfo?: string): Promise<void> {
+    await this.client.post('/api/friend/block', {
+      user_id: userId,
+      reason,
+      additional_info: additionalInfo,
+    });
   }
 
   /**
@@ -169,6 +193,44 @@ class FriendApiClient {
   async getBlockedUsers(): Promise<BlockedUser[]> {
     const response = await this.client.get('/api/friend/blocked');
     return response.data;
+  }
+
+  // ============ Notifications ============
+
+  /**
+   * Get notifications for the current user
+   * @param unreadOnly Only return unread notifications
+   * @param limit Maximum number of notifications
+   * @param offset Offset for pagination
+   */
+  async getNotifications(unreadOnly: boolean = false, limit: number = 50, offset: number = 0): Promise<Notification[]> {
+    const response = await this.client.get('/api/friend/notifications', {
+      params: { unread_only: unreadOnly, limit, offset },
+    });
+    return response.data;
+  }
+
+  /**
+   * Get notification counts for badge display
+   */
+  async getNotificationCount(): Promise<NotificationCount> {
+    const response = await this.client.get('/api/friend/notifications/count');
+    return response.data;
+  }
+
+  /**
+   * Mark a notification as read
+   * @param notificationId The notification ID
+   */
+  async markNotificationRead(notificationId: number): Promise<void> {
+    await this.client.post(`/api/friend/notifications/${notificationId}/read`);
+  }
+
+  /**
+   * Mark all notifications as read
+   */
+  async markAllNotificationsRead(): Promise<void> {
+    await this.client.post('/api/friend/notifications/read-all');
   }
 
   // ============ User Search ============

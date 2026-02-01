@@ -10,6 +10,7 @@ from datetime import datetime
 import hashlib
 import secrets
 import time
+import json
 
 from app.db.database import get_db, User
 from app.db.friend_models import (
@@ -18,7 +19,9 @@ from app.db.friend_models import (
     BlockedUser as BlockedUserModel,
     FriendRequestStatusEnum,
     TrustLevelEnum,
-    BlockReasonEnum
+    BlockReasonEnum,
+    Notification,
+    NotificationTypeEnum
 )
 from app.db.friend_repo import FriendRepository
 from app.models.friend import (
@@ -35,11 +38,21 @@ from app.models.friend import (
     UserSearchResult,
     PendingRequestsResponse,
     QRCodeData,
-    compute_key_fingerprint
+    compute_key_fingerprint,
+    NotificationResponse,
+    NotificationCountResponse,
+    UnfriendRequest
 )
 from app.api.routes.auth import oauth2_scheme
 from app.core.security import decode_access_token
-from app.api.websocket import notify_friend_request_accepted, notify_friend_request_rejected, notify_friend_request
+from app.api.websocket import (
+    notify_friend_request_accepted, 
+    notify_friend_request_rejected, 
+    notify_friend_request,
+    notify_contact_removed,
+    notify_blocked,
+    notify_unblocked
+)
 
 router = APIRouter()
 
@@ -799,3 +812,156 @@ async def notify_key_changed(
         )
     
     return {"message": "Contact key updated", "requires_verification": True}
+
+
+# ============ Unfriend Endpoint ============
+
+@router.post("/unfriend", status_code=status.HTTP_200_OK)
+async def unfriend_user(
+    unfriend_data: UnfriendRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Unfriend a user with full cleanup.
+    
+    Effects:
+    - Removes contact from both sides
+    - Optionally revokes shared encryption keys
+    - Notifies the other user
+    - Messages preserved locally only (no sync)
+    """
+    repo = FriendRepository(db)
+    
+    # Get user info for notification
+    contact_user = db.query(User).filter(User.id == unfriend_data.user_id).first()
+    current_user = db.query(User).filter(User.id == user_id).first()
+    
+    if not contact_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    success, error = repo.unfriend_user(
+        user_id=user_id,
+        contact_user_id=unfriend_data.user_id,
+        revoke_keys=unfriend_data.revoke_keys
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+    
+    # Send real-time notification
+    if current_user:
+        await notify_contact_removed(
+            user_id=unfriend_data.user_id,
+            removed_by_username=current_user.username
+        )
+    
+    return {
+        "success": True,
+        "message": f"Unfriended {contact_user.username}",
+        "keys_revoked": unfriend_data.revoke_keys
+    }
+
+
+# ============ Notification Endpoints ============
+
+@router.get("/notifications", response_model=List[NotificationResponse])
+async def get_notifications(
+    unread_only: bool = Query(False, description="Only return unread notifications"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Get notifications for the current user.
+    
+    Returns friend request notifications, contact updates, and system messages.
+    """
+    repo = FriendRepository(db)
+    
+    if unread_only:
+        notifications = repo.get_unread_notifications(user_id, limit)
+    else:
+        notifications = repo.get_all_notifications(user_id, limit, offset)
+    
+    responses = []
+    for notif in notifications:
+        # Get related user info if available
+        related_username = None
+        if notif.related_user_id:
+            related_user = db.query(User).filter(User.id == notif.related_user_id).first()
+            related_username = related_user.username if related_user else None
+        
+        # Parse payload if it's a JSON string
+        payload = None
+        if notif.payload:
+            try:
+                payload = json.loads(notif.payload)
+            except:
+                payload = {"raw": notif.payload}
+        
+        responses.append(NotificationResponse(
+            id=notif.id,
+            notification_type=notif.notification_type.value,
+            title=notif.title,
+            message=notif.message,
+            payload=payload,
+            related_user_id=notif.related_user_id,
+            related_username=related_username,
+            is_read=notif.is_read,
+            is_delivered=notif.is_delivered,
+            created_at=notif.created_at
+        ))
+    
+    return responses
+
+
+@router.get("/notifications/count", response_model=NotificationCountResponse)
+async def get_notification_count(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Get notification counts for badge display.
+    """
+    repo = FriendRepository(db)
+    counts = repo.get_notification_count(user_id)
+    return NotificationCountResponse(**counts)
+
+
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Mark a specific notification as read"""
+    repo = FriendRepository(db)
+    success = repo.mark_notification_read(notification_id, user_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found"
+        )
+    
+    return {"message": "Notification marked as read"}
+
+
+@router.post("/notifications/read-all")
+async def mark_all_notifications_read(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Mark all notifications as read"""
+    repo = FriendRepository(db)
+    count = repo.mark_all_notifications_read(user_id)
+    
+    return {"message": f"Marked {count} notifications as read"}

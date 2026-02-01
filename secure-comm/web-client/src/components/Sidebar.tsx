@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance } from '@/lib/useAppearance';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,15 +8,18 @@ import { MotionAvatar, TiltCard } from '@/components/motion';
 import { motionVariants } from '@/lib/motion/config';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
-  Shield, User as UserIcon, Loader2, UserPlus, X, Users
+  Shield, User as UserIcon, Loader2, UserPlus, X, Users,
+  ShieldBan, RefreshCw
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
+import { friendApi } from '@/lib/friendApi';
 
 interface SidebarProps {
   onNewChat: () => void;
   onSettings: () => void;
   onAddFriend: () => void;
   onPendingRequests: () => void;
+  onBlockedUsers?: () => void;
 }
 
 interface SearchResult {
@@ -26,7 +29,13 @@ interface SearchResult {
   is_online?: boolean;
 }
 
-export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingRequests }: SidebarProps) {
+export default function Sidebar({ 
+  onNewChat, 
+  onSettings, 
+  onAddFriend, 
+  onPendingRequests,
+  onBlockedUsers 
+}: SidebarProps) {
   const { 
     user, conversations, currentConversation, 
     setCurrentConversation, logout, onlineUsers,
@@ -42,6 +51,76 @@ export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingR
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [addingUser, setAddingUser] = useState<number | null>(null);
+  
+  // Badge state
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [isRefreshingContacts, setIsRefreshingContacts] = useState(false);
+
+  // Fetch pending request count
+  const fetchPendingRequestCount = useCallback(async () => {
+    try {
+      const pending = await friendApi.getPendingRequests();
+      setPendingRequestCount(pending.incoming?.length || 0);
+    } catch (error) {
+      console.error('Failed to fetch pending requests:', error);
+    }
+  }, []);
+
+  // Refresh contacts from server
+  const refreshContacts = useCallback(async () => {
+    setIsRefreshingContacts(true);
+    try {
+      await loadContacts();
+      await loadConversations();
+      await fetchPendingRequestCount();
+    } catch (error) {
+      console.error('Failed to refresh contacts:', error);
+    } finally {
+      setIsRefreshingContacts(false);
+    }
+  }, [loadContacts, loadConversations, fetchPendingRequestCount]);
+
+  // Listen for WebSocket events via window custom events
+  useEffect(() => {
+    const handleContactsSync = () => {
+      console.log('Contacts sync event received');
+      refreshContacts();
+    };
+
+    const handleFriendRequest = () => {
+      fetchPendingRequestCount();
+    };
+
+    const handleContactRemoved = () => {
+      refreshContacts();
+    };
+
+    // Listen for custom events dispatched from WebSocket handler
+    window.addEventListener('contacts_sync', handleContactsSync);
+    window.addEventListener('friend_request', handleFriendRequest);
+    window.addEventListener('friend_accepted', handleFriendRequest);
+    window.addEventListener('contact_removed', handleContactRemoved);
+    window.addEventListener('blocked', handleContactRemoved);
+
+    return () => {
+      window.removeEventListener('contacts_sync', handleContactsSync);
+      window.removeEventListener('friend_request', handleFriendRequest);
+      window.removeEventListener('friend_accepted', handleFriendRequest);
+      window.removeEventListener('contact_removed', handleContactRemoved);
+      window.removeEventListener('blocked', handleContactRemoved);
+    };
+  }, [refreshContacts, fetchPendingRequestCount]);
+
+  // Initial fetch of pending requests
+  useEffect(() => {
+    fetchPendingRequestCount();
+    
+    // Poll for counts every 30 seconds
+    const interval = setInterval(() => {
+      fetchPendingRequestCount();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPendingRequestCount]);
 
   // Filter existing conversations based on search query
   const filteredConversations = useMemo(() => {
@@ -135,7 +214,8 @@ export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingR
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        <div className="flex items-center justify-between mb-4">
+        {/* Header Row */}
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <motion.div 
               className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -147,34 +227,7 @@ export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingR
             </motion.div>
             <span className="font-bold text-white dark:text-white">ZeroTrace</span>
           </div>
-          <div className="flex items-center gap-2">
-            <motion.button
-              onClick={onAddFriend}
-              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors"
-              title="Add Friend"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <UserPlus className="w-5 h-5" />
-            </motion.button>
-            <motion.button
-              onClick={onPendingRequests}
-              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors"
-              title="Pending Requests"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Users className="w-5 h-5" />
-            </motion.button>
-            <motion.button
-              onClick={onNewChat}
-              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
-              title="New Chat"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Plus className="w-5 h-5" />
-            </motion.button>
+          <div className="flex items-center gap-1">
             <motion.button
               onClick={onSettings}
               className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
@@ -185,6 +238,78 @@ export default function Sidebar({ onNewChat, onSettings, onAddFriend, onPendingR
               <Settings className="w-5 h-5" />
             </motion.button>
           </div>
+        </div>
+
+        {/* Action Buttons Row */}
+        <div className="flex items-center justify-between bg-gray-800/30 rounded-lg p-1 mb-3">
+          <motion.button
+            onClick={onAddFriend}
+            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors"
+            title="Add Friend"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <UserPlus className="w-4 h-4" />
+            <span className="text-[10px]">Add</span>
+          </motion.button>
+          
+          <motion.button
+            onClick={onPendingRequests}
+            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative"
+            title="Pending Requests"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="relative">
+              <Users className="w-4 h-4" />
+              {pendingRequestCount > 0 && (
+                <motion.span
+                  className="absolute -top-2 -right-2 w-4 h-4 bg-yellow-500 text-black text-[9px] rounded-full flex items-center justify-center font-bold"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                >
+                  {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                </motion.span>
+              )}
+            </div>
+            <span className="text-[10px]">Requests</span>
+          </motion.button>
+          
+          {onBlockedUsers && (
+            <motion.button
+              onClick={onBlockedUsers}
+              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
+              title="Blocked Users"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <ShieldBan className="w-4 h-4" />
+              <span className="text-[10px]">Blocked</span>
+            </motion.button>
+          )}
+          
+          <motion.button
+            onClick={onNewChat}
+            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors"
+            title="New Chat"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-[10px]">New</span>
+          </motion.button>
+          
+          <motion.button
+            onClick={refreshContacts}
+            disabled={isRefreshingContacts}
+            className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
+            title="Refresh"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
+            <span className="text-[10px]">Refresh</span>
+          </motion.button>
         </div>
 
         {/* User Info with Tilt Avatar */}

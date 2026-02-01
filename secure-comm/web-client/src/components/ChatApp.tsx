@@ -11,6 +11,7 @@ import NewChatModal from './NewChatModal';
 import SettingsModal from './SettingsModal';
 import AddFriendPanel from './AddFriendPanel';
 import PendingRequestsPanel from './PendingRequestsPanel';
+import BlockedUsersPanel from './BlockedUsersPanel';
 import { Lock, Menu, X } from 'lucide-react';
 
 export default function ChatApp() {
@@ -22,6 +23,7 @@ export default function ChatApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showPendingRequests, setShowPendingRequests] = useState(false);
+  const [showBlockedUsers, setShowBlockedUsers] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export default function ChatApp() {
           onSettings={() => setShowSettings(true)}
           onAddFriend={() => setShowAddFriend(true)}
           onPendingRequests={() => setShowPendingRequests(true)}
+          onBlockedUsers={() => setShowBlockedUsers(true)}
         />
       </motion.div>
 
@@ -178,6 +181,10 @@ export default function ChatApp() {
         onRequestRejected={() => {
           // Optionally refresh something
         }}
+      />
+      <BlockedUsersPanel
+        isOpen={showBlockedUsers}
+        onClose={() => setShowBlockedUsers(false)}
       />
 
       {/* Mobile Overlay */}

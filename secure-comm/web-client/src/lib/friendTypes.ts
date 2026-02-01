@@ -8,6 +8,16 @@
 export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
 export type TrustLevel = 'unverified' | 'verified' | 'trusted';
 export type BlockReason = 'spam' | 'harassment' | 'unwanted' | 'other';
+export type NotificationType = 
+  | 'friend_request'
+  | 'friend_request_accepted'
+  | 'friend_request_rejected'
+  | 'contact_removed'
+  | 'user_blocked'
+  | 'user_unblocked'
+  | 'key_changed'
+  | 'contact_verified'
+  | 'system';
 
 export interface FriendRequest {
   id: number;
@@ -82,6 +92,26 @@ export interface CanMessageResponse {
   trust_level?: TrustLevel;
 }
 
+export interface Notification {
+  id: number;
+  notification_type: NotificationType;
+  title: string;
+  message?: string;
+  payload?: Record<string, any>;
+  related_user_id?: number;
+  related_username?: string;
+  is_read: boolean;
+  is_delivered: boolean;
+  created_at: string;
+}
+
+export interface NotificationCount {
+  total: number;
+  unread: number;
+  friend_requests: number;
+  security_alerts: number;
+}
+
 // ============ Request Types ============
 
 export interface SendFriendRequestData {
@@ -110,6 +140,17 @@ export interface BlockUserData {
 export interface VerifyContactData {
   contact_user_id: number;
   verified_fingerprint: string;
+}
+
+export interface UnfriendData {
+  user_id: number;
+  revoke_keys?: boolean;
+}
+
+export interface UnfriendResponse {
+  success: boolean;
+  message: string;
+  keys_revoked: boolean;
 }
 
 // ============ WebSocket Event Types ============
@@ -148,6 +189,44 @@ export interface KeyChangedEvent {
   requires_verification: boolean;
   timestamp: string;
 }
+
+export interface ContactsSyncEvent {
+  type: 'contacts_sync';
+  contacts: Array<{
+    contact_user_id: number;
+    username: string;
+    public_key?: string;
+    identity_key?: string;
+    fingerprint: string;
+    trust_level: TrustLevel;
+    is_verified: boolean;
+    is_online: boolean;
+  }>;
+  total: number;
+  timestamp: string;
+}
+
+export interface NotificationEvent {
+  type: 'notification';
+  notification_id: number;
+  notification_type: NotificationType;
+  title: string;
+  message?: string;
+  payload?: Record<string, any>;
+  related_user_id?: number;
+  created_at?: string;
+  timestamp: string;
+}
+
+// Union type for all friend system WebSocket events
+export type FriendSystemEvent =
+  | FriendRequestEvent
+  | FriendRequestAcceptedEvent
+  | FriendRequestRejectedEvent
+  | ContactRemovedEvent
+  | KeyChangedEvent
+  | ContactsSyncEvent
+  | NotificationEvent;
 
 export type FriendEvent =
   | FriendRequestEvent

@@ -81,6 +81,12 @@ class ConnectionManager:
         
         # Deliver any pending messages
         await self._deliver_pending_messages(user_id)
+        
+        # Deliver pending notifications (friend requests, etc.)
+        asyncio.create_task(self._deliver_pending_notifications(user_id))
+        
+        # Sync contacts to client for sidebar
+        asyncio.create_task(self._sync_contacts(user_id))
     
     def disconnect(self, user_id: int):
         """Handle disconnection and notify subscribers"""
@@ -226,6 +232,79 @@ class ConnectionManager:
             if 'db' in locals():
                 db.rollback()
                 db.close()
+    
+    async def _deliver_pending_notifications(self, user_id: int):
+        """Deliver pending notifications when user connects"""
+        try:
+            db = SessionLocal()
+            from app.db.friend_repo import FriendRepository
+            repo = FriendRepository(db)
+            
+            notifications = repo.get_undelivered_notifications(user_id)
+            
+            for notif in notifications:
+                notification_data = {
+                    "type": "notification",
+                    "notification_id": notif.id,
+                    "notification_type": notif.notification_type.value if hasattr(notif.notification_type, 'value') else str(notif.notification_type),
+                    "title": notif.title,
+                    "message": notif.message,
+                    "payload": notif.payload,
+                    "related_user_id": notif.related_user_id,
+                    "created_at": notif.created_at.isoformat() if notif.created_at else None,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                delivered = await self.send_personal_message(notification_data, user_id)
+                if delivered:
+                    repo.mark_notification_delivered(notif.id)
+            
+            if notifications:
+                print(f"📬 Delivered {len(notifications)} pending notifications to user {user_id}")
+            
+            db.close()
+        except Exception as e:
+            print(f"❌ Error delivering pending notifications: {e}")
+    
+    async def _sync_contacts(self, user_id: int):
+        """Sync contacts to client on connection for sidebar auto-update"""
+        try:
+            db = SessionLocal()
+            from app.db.friend_repo import FriendRepository
+            repo = FriendRepository(db)
+            
+            contacts = repo.get_trusted_contacts(user_id)
+            
+            contact_list = []
+            for contact in contacts:
+                contact_user = db.query(User).filter(User.id == contact.contact_user_id).first()
+                if contact_user:
+                    contact_list.append({
+                        "contact_user_id": contact.contact_user_id,
+                        "username": contact_user.username,
+                        "public_key": contact_user.public_key,
+                        "identity_key": contact_user.identity_key,
+                        "fingerprint": contact.contact_public_key_fingerprint,
+                        "trust_level": contact.trust_level.value if hasattr(contact.trust_level, 'value') else str(contact.trust_level),
+                        "is_verified": contact.is_verified,
+                        "is_online": self.is_online(contact.contact_user_id)
+                    })
+            
+            sync_message = {
+                "type": "contacts_sync",
+                "contacts": contact_list,
+                "total": len(contact_list),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            await self.send_personal_message(sync_message, user_id)
+            
+            if contact_list:
+                print(f"🔄 Synced {len(contact_list)} contacts to user {user_id}")
+            
+            db.close()
+        except Exception as e:
+            print(f"❌ Error syncing contacts: {e}")
 
 
 manager = ConnectionManager()
@@ -940,4 +1019,92 @@ async def notify_blocked(blocked_user_id: int):
     
     delivered = await manager.send_personal_message(notification, blocked_user_id)
     return delivered
+
+
+async def notify_unblocked(user_id: int, unblocker_username: str):
+    """
+    Notify user they've been unblocked
+    """
+    notification = {
+        "type": "user_unblocked",
+        "unblocker_username": unblocker_username,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    delivered = await manager.send_personal_message(notification, user_id)
+    return delivered
+
+
+async def deliver_pending_notifications(user_id: int):
+    """
+    Deliver all pending notifications when a user connects
+    Called from ConnectionManager.connect()
+    """
+    try:
+        db = SessionLocal()
+        from app.db.friend_repo import FriendRepository
+        repo = FriendRepository(db)
+        
+        notifications = repo.get_undelivered_notifications(user_id)
+        
+        for notif in notifications:
+            notification_data = {
+                "type": "notification",
+                "notification_id": notif.id,
+                "notification_type": notif.notification_type.value if hasattr(notif.notification_type, 'value') else notif.notification_type,
+                "title": notif.title,
+                "message": notif.message,
+                "payload": notif.payload,
+                "related_user_id": notif.related_user_id,
+                "created_at": notif.created_at.isoformat() if notif.created_at else None,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            delivered = await manager.send_personal_message(notification_data, user_id)
+            if delivered:
+                repo.mark_notification_delivered(notif.id)
+        
+        db.close()
+    except Exception as e:
+        print(f"Error delivering pending notifications: {e}")
+
+
+async def sync_contacts_to_client(user_id: int):
+    """
+    Send the full contacts list to a newly connected user
+    for sidebar synchronization
+    """
+    try:
+        db = SessionLocal()
+        from app.db.friend_repo import FriendRepository
+        repo = FriendRepository(db)
+        
+        contacts = repo.get_trusted_contacts(user_id)
+        
+        contact_list = []
+        for contact in contacts:
+            contact_user = db.query(User).filter(User.id == contact.contact_user_id).first()
+            if contact_user:
+                contact_list.append({
+                    "contact_user_id": contact.contact_user_id,
+                    "username": contact_user.username,
+                    "public_key": contact_user.public_key,
+                    "identity_key": contact_user.identity_key,
+                    "fingerprint": contact.contact_public_key_fingerprint,
+                    "trust_level": contact.trust_level.value if hasattr(contact.trust_level, 'value') else contact.trust_level,
+                    "is_verified": contact.is_verified,
+                    "is_online": manager.is_online(contact.contact_user_id)
+                })
+        
+        sync_message = {
+            "type": "contacts_sync",
+            "contacts": contact_list,
+            "total": len(contact_list),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        await manager.send_personal_message(sync_message, user_id)
+        db.close()
+    except Exception as e:
+        print(f"Error syncing contacts: {e}")
 

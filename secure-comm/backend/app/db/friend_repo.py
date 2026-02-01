@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Tuple
 import secrets
 import hashlib
+import json
 
 from app.db.friend_models import (
     FriendRequest, 
@@ -17,7 +18,10 @@ from app.db.friend_models import (
     FriendRequestRateLimit,
     FriendRequestStatusEnum,
     TrustLevelEnum,
-    BlockReasonEnum
+    BlockReasonEnum,
+    Notification,
+    NotificationTypeEnum,
+    RejectionLog
 )
 from app.db.database import User
 
@@ -667,6 +671,256 @@ class FriendRepository:
             })
         
         return results
+    
+    # ============ Notification Methods ============
+    
+    def create_notification(
+        self,
+        user_id: int,
+        notification_type: NotificationTypeEnum,
+        title: str,
+        message: Optional[str] = None,
+        payload: Optional[dict] = None,
+        related_user_id: Optional[int] = None,
+        related_request_id: Optional[int] = None,
+        expires_hours: int = 168  # Default 7 days
+    ) -> Notification:
+        """Create a new notification for a user"""
+        notification = Notification(
+            user_id=user_id,
+            notification_type=notification_type,
+            title=title,
+            message=message,
+            payload=json.dumps(payload) if payload else None,
+            related_user_id=related_user_id,
+            related_request_id=related_request_id,
+            expires_at=datetime.utcnow() + timedelta(hours=expires_hours)
+        )
+        self.db.add(notification)
+        self.db.commit()
+        self.db.refresh(notification)
+        return notification
+    
+    def get_unread_notifications(self, user_id: int, limit: int = 50) -> List[Notification]:
+        """Get unread notifications for a user"""
+        return self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False,
+            or_(
+                Notification.expires_at == None,
+                Notification.expires_at > datetime.utcnow()
+            )
+        ).order_by(Notification.created_at.desc()).limit(limit).all()
+    
+    def get_all_notifications(self, user_id: int, limit: int = 100, offset: int = 0) -> List[Notification]:
+        """Get all notifications for a user"""
+        return self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            or_(
+                Notification.expires_at == None,
+                Notification.expires_at > datetime.utcnow()
+            )
+        ).order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
+    
+    def mark_notification_read(self, notification_id: int, user_id: int) -> bool:
+        """Mark a notification as read"""
+        notification = self.db.query(Notification).filter(
+            Notification.id == notification_id,
+            Notification.user_id == user_id
+        ).first()
+        
+        if notification:
+            notification.is_read = True
+            notification.read_at = datetime.utcnow()
+            self.db.commit()
+            return True
+        return False
+    
+    def mark_all_notifications_read(self, user_id: int) -> int:
+        """Mark all notifications as read for a user"""
+        count = self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False
+        ).update({
+            "is_read": True,
+            "read_at": datetime.utcnow()
+        })
+        self.db.commit()
+        return count
+    
+    def mark_notification_delivered(self, notification_id: int) -> bool:
+        """Mark a notification as delivered via WebSocket"""
+        notification = self.db.query(Notification).filter(
+            Notification.id == notification_id
+        ).first()
+        
+        if notification:
+            notification.is_delivered = True
+            notification.delivered_at = datetime.utcnow()
+            self.db.commit()
+            return True
+        return False
+    
+    def get_undelivered_notifications(self, user_id: int) -> List[Notification]:
+        """Get notifications that haven't been delivered via WebSocket"""
+        return self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_delivered == False,
+            or_(
+                Notification.expires_at == None,
+                Notification.expires_at > datetime.utcnow()
+            )
+        ).order_by(Notification.created_at.asc()).all()
+    
+    def get_notification_count(self, user_id: int) -> dict:
+        """Get notification counts for a user"""
+        # Total notifications
+        total = self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            or_(
+                Notification.expires_at == None,
+                Notification.expires_at > datetime.utcnow()
+            )
+        ).count()
+        
+        # Unread notifications
+        unread = self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False,
+            or_(
+                Notification.expires_at == None,
+                Notification.expires_at > datetime.utcnow()
+            )
+        ).count()
+        
+        # Friend request notifications
+        friend_request_count = self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False,
+            Notification.notification_type == NotificationTypeEnum.FRIEND_REQUEST
+        ).count()
+        
+        # Security alerts (key changed, blocked, etc.)
+        security_alert_types = [
+            NotificationTypeEnum.KEY_CHANGED,
+            NotificationTypeEnum.USER_BLOCKED,
+            NotificationTypeEnum.CONTACT_REMOVED
+        ]
+        security_alert_count = self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.is_read == False,
+            Notification.notification_type.in_(security_alert_types)
+        ).count()
+        
+        return {
+            "total": total,
+            "unread": unread,
+            "friend_requests": friend_request_count,
+            "security_alerts": security_alert_count
+        }
+    
+    def cleanup_expired_notifications(self) -> int:
+        """Remove expired notifications"""
+        count = self.db.query(Notification).filter(
+            Notification.expires_at < datetime.utcnow()
+        ).delete()
+        self.db.commit()
+        return count
+    
+    # ============ Rejection Tracking ============
+    
+    def log_rejection(self, sender_id: int, receiver_id: int) -> None:
+        """Log a rejection for anti-spam tracking (hashed for privacy)"""
+        # Create deterministic hash of the pair
+        pair_str = f"{min(sender_id, receiver_id)}:{max(sender_id, receiver_id)}"
+        rejection_hash = hashlib.sha256(pair_str.encode()).hexdigest()
+        
+        existing = self.db.query(RejectionLog).filter(
+            RejectionLog.rejection_hash == rejection_hash
+        ).first()
+        
+        if existing:
+            existing.rejection_count += 1
+            existing.created_at = datetime.utcnow()
+        else:
+            log = RejectionLog(rejection_hash=rejection_hash)
+            self.db.add(log)
+        
+        self.db.commit()
+    
+    def check_rejection_pattern(self, sender_id: int, receiver_id: int) -> int:
+        """Check how many times this pair has had rejections"""
+        pair_str = f"{min(sender_id, receiver_id)}:{max(sender_id, receiver_id)}"
+        rejection_hash = hashlib.sha256(pair_str.encode()).hexdigest()
+        
+        existing = self.db.query(RejectionLog).filter(
+            RejectionLog.rejection_hash == rejection_hash
+        ).first()
+        
+        return existing.rejection_count if existing else 0
+    
+    # ============ Unfriend with Cleanup ============
+    
+    def unfriend_user(
+        self,
+        user_id: int,
+        contact_user_id: int,
+        revoke_keys: bool = True
+    ) -> Tuple[bool, str]:
+        """
+        Unfriend a user with full cleanup
+        - Removes contact from both sides
+        - Optionally revokes encryption keys
+        - Creates notification
+        Returns (success, error_message)
+        """
+        # Get both contact records
+        user_contact = self.get_contact(user_id, contact_user_id)
+        other_contact = self.get_contact(contact_user_id, user_id)
+        
+        if not user_contact and not other_contact:
+            return False, "Not a contact"
+        
+        # Get usernames for notifications
+        user = self.db.query(User).filter(User.id == user_id).first()
+        other_user = self.db.query(User).filter(User.id == contact_user_id).first()
+        
+        now = datetime.utcnow()
+        
+        # Soft delete both contact records
+        if user_contact:
+            user_contact.is_removed = True
+            user_contact.removed_at = now
+            # Reset key info for key revocation
+            if revoke_keys:
+                user_contact.key_version += 1
+                user_contact.is_verified = False
+                user_contact.trust_level = TrustLevelEnum.UNVERIFIED
+        
+        if other_contact:
+            other_contact.is_removed = True
+            other_contact.removed_at = now
+            if revoke_keys:
+                other_contact.key_version += 1
+                other_contact.is_verified = False
+                other_contact.trust_level = TrustLevelEnum.UNVERIFIED
+        
+        # Create notification for the other user
+        if other_user and user:
+            self.create_notification(
+                user_id=contact_user_id,
+                notification_type=NotificationTypeEnum.CONTACT_REMOVED,
+                title="Contact Removed",
+                message=f"{user.username} has removed you from their contacts",
+                payload={
+                    "removed_by_user_id": user_id,
+                    "removed_by_username": user.username
+                },
+                related_user_id=user_id
+            )
+        
+        self.db.commit()
+        return True, ""
     
     # ============ Helper Methods ============
     

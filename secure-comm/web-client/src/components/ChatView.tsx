@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { friendApi } from '@/lib/friendApi';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   decryptMessage,
@@ -20,7 +21,7 @@ import {
   MoreVertical, Shield, Check, CheckCheck, Clock,
   ArrowLeft, Info, X, PhoneOff, Mic, MicOff,
   VideoOff, Image, File, Loader2, Download, FileText,
-  AlertCircle, Monitor, Trash2
+  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff
 } from 'lucide-react';
 import { format } from 'date-fns';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
@@ -160,6 +161,12 @@ export default function ChatView() {
     deleteForEveryone?: boolean;
   } | null>(null);
 
+  const [contactActionDialog, setContactActionDialog] = useState<{
+    visible: boolean;
+    type: 'block' | 'unblock' | 'remove';
+    loading: boolean;
+  } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -167,6 +174,7 @@ export default function ChatView() {
   const contact = contacts.find(c => c.contact_username === currentConversation);
   const conversation = conversations.find(c => c.username === currentConversation);
   const isFriend = contact && !contact.is_blocked;
+  const isBlocked = contact?.is_blocked || false;
 
   const partnerId = contact?.contact_id || conversation?.user_id;
   const partnerKey = contact?.public_key || conversation?.public_key;
@@ -217,6 +225,20 @@ export default function ChatView() {
       loadContacts();
     }
   }, [currentConversation, contact, loadContacts]);
+
+  // Close chat menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showChatMenu) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('.chat-menu-container')) {
+          setShowChatMenu(false);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showChatMenu]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -595,6 +617,64 @@ export default function ChatView() {
     setShowChatMenu(false);
   };
 
+  // Block user handler
+  const handleBlockUser = () => {
+    setContactActionDialog({
+      visible: true,
+      type: 'block',
+      loading: false,
+    });
+    setShowChatMenu(false);
+  };
+
+  // Unblock user handler
+  const handleUnblockUser = () => {
+    setContactActionDialog({
+      visible: true,
+      type: 'unblock',
+      loading: false,
+    });
+    setShowChatMenu(false);
+  };
+
+  // Remove contact handler
+  const handleRemoveContact = () => {
+    setContactActionDialog({
+      visible: true,
+      type: 'remove',
+      loading: false,
+    });
+    setShowChatMenu(false);
+  };
+
+  // Confirm contact action (block/unblock/remove)
+  const confirmContactAction = async () => {
+    if (!contactActionDialog || !partnerId) return;
+
+    setContactActionDialog({ ...contactActionDialog, loading: true });
+
+    try {
+      if (contactActionDialog.type === 'block') {
+        await friendApi.blockUser(partnerId, 'other');
+        console.log('✅ User blocked successfully');
+      } else if (contactActionDialog.type === 'unblock') {
+        await friendApi.unblockUser(partnerId);
+        console.log('✅ User unblocked successfully');
+      } else if (contactActionDialog.type === 'remove') {
+        await friendApi.removeContact(partnerId);
+        console.log('✅ Contact removed successfully');
+        setCurrentConversation(null);
+      }
+
+      // Refresh contacts list
+      await loadContacts();
+    } catch (error) {
+      console.error(`Failed to ${contactActionDialog.type} user:`, error);
+    }
+
+    setContactActionDialog(null);
+  };
+
   const confirmDeletion = async () => {
     if (!deleteConfirmation || !currentConversation) return;
 
@@ -786,7 +866,7 @@ export default function ChatView() {
             <Info className="w-5 h-5" />
           </motion.button>
 
-          <div className="relative">
+          <div className="relative chat-menu-container">
             <motion.button
               onClick={() => setShowChatMenu(!showChatMenu)}
               className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
@@ -799,7 +879,7 @@ export default function ChatView() {
 
             {showChatMenu && (
               <motion.div
-                className="absolute right-0 top-full mt-1 bg-cipher-dark border border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px] z-50"
+                className="absolute right-0 top-full mt-1 bg-cipher-dark border border-gray-700 rounded-lg shadow-xl py-1 min-w-[200px] z-50"
                 initial={{ opacity: 0, y: -10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
               >
@@ -812,11 +892,43 @@ export default function ChatView() {
                 </button>
                 <button
                   onClick={handleDeleteConversation}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Delete for everyone</span>
                 </button>
+                
+                <div className="border-t border-gray-700 my-1" />
+                
+                {/* Block/Unblock option */}
+                {isBlocked ? (
+                  <button
+                    onClick={handleUnblockUser}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-green-400 hover:bg-green-500/10 transition-colors"
+                  >
+                    <ShieldOff className="w-4 h-4" />
+                    <span>Unblock user</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleBlockUser}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-orange-400 hover:bg-orange-500/10 transition-colors"
+                  >
+                    <UserX className="w-4 h-4" />
+                    <span>Block user</span>
+                  </button>
+                )}
+                
+                {/* Remove contact option */}
+                {contact && (
+                  <button
+                    onClick={handleRemoveContact}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <UserMinus className="w-4 h-4" />
+                    <span>Remove contact</span>
+                  </button>
+                )}
               </motion.div>
             )}
           </div>
@@ -1503,6 +1615,86 @@ export default function ChatView() {
           )
         }
       </AnimatePresence >
+
+      {/* Contact Action Confirmation Dialog (Block/Unblock/Remove) */}
+      <AnimatePresence>
+        {
+          contactActionDialog && contactActionDialog.visible && (
+            <motion.div
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[110]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="bg-cipher-dark border border-gray-700 rounded-2xl p-6 max-w-sm mx-4 shadow-2xl"
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                    contactActionDialog.type === 'block' 
+                      ? 'bg-orange-500/20' 
+                      : contactActionDialog.type === 'unblock'
+                        ? 'bg-green-500/20'
+                        : 'bg-red-500/20'
+                  }`}>
+                    {contactActionDialog.type === 'block' && <UserX className="w-6 h-6 text-orange-400" />}
+                    {contactActionDialog.type === 'unblock' && <ShieldOff className="w-6 h-6 text-green-400" />}
+                    {contactActionDialog.type === 'remove' && <UserMinus className="w-6 h-6 text-red-400" />}
+                  </div>
+                  <h3 className="text-lg font-semibold text-white">
+                    {contactActionDialog.type === 'block'
+                      ? 'Block user?'
+                      : contactActionDialog.type === 'unblock'
+                        ? 'Unblock user?'
+                        : 'Remove contact?'}
+                  </h3>
+                </div>
+                <p className="text-gray-400 text-sm mb-6">
+                  {contactActionDialog.type === 'block'
+                    ? `${currentConversation} will no longer be able to send you messages or see when you're online.`
+                    : contactActionDialog.type === 'unblock'
+                      ? `${currentConversation} will be able to send you messages again.`
+                      : `${currentConversation} will be removed from your contacts. You'll need to send a new friend request to message them again.`}
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <motion.button
+                    onClick={() => setContactActionDialog(null)}
+                    disabled={contactActionDialog.loading}
+                    className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    Cancel
+                  </motion.button>
+                  <motion.button
+                    onClick={confirmContactAction}
+                    disabled={contactActionDialog.loading}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+                      contactActionDialog.type === 'block'
+                        ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                        : contactActionDialog.type === 'unblock'
+                          ? 'bg-green-500 hover:bg-green-600 text-white'
+                          : 'bg-red-500 hover:bg-red-600 text-white'
+                    } disabled:opacity-50`}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    {contactActionDialog.loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {contactActionDialog.type === 'block'
+                      ? 'Block'
+                      : contactActionDialog.type === 'unblock'
+                        ? 'Unblock'
+                        : 'Remove'}
+                  </motion.button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )
+        }
+      </AnimatePresence>
     </div >
   );
 }

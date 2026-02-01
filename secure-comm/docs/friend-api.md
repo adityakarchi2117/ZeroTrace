@@ -335,6 +335,141 @@ DELETE /api/friend/contact/{contact_user_id}
 
 ---
 
+### Unfriend User
+
+Fully remove a trusted contact with optional key revocation. This is the recommended way to remove contacts as it handles cleanup properly.
+
+```http
+POST /api/friend/unfriend
+```
+
+**Request Body:**
+```json
+{
+  "user_id": 456,
+  "revoke_keys": true
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Successfully unfriended user",
+  "keys_revoked": true
+}
+```
+
+**Side Effects:**
+- Removes contact relationship bilaterally (both sides)
+- Optionally revokes shared encryption keys
+- Sends real-time notification to the other user
+- Creates notification record for audit trail
+- Both users must re-add each other to communicate again
+
+---
+
+### Get Notifications
+
+Retrieve notifications for the authenticated user.
+
+```http
+GET /api/friend/notifications?unread_only=false&limit=50&offset=0
+```
+
+**Query Parameters:**
+- `unread_only`: Boolean, if true only return unread notifications (default: false)
+- `limit`: Maximum number to return (default: 50, max: 100)
+- `offset`: Pagination offset (default: 0)
+
+**Response (200 OK):**
+```json
+[
+  {
+    "id": 1,
+    "notification_type": "friend_request",
+    "title": "New Friend Request",
+    "message": "alice wants to connect with you",
+    "payload": {"sender_username": "alice", "request_id": 123},
+    "related_user_id": 456,
+    "is_read": false,
+    "is_delivered": true,
+    "created_at": "2024-01-15T10:30:00Z",
+    "read_at": null
+  }
+]
+```
+
+**Notification Types:**
+- `friend_request`: Incoming friend request
+- `accepted`: Friend request accepted
+- `rejected`: Friend request rejected (sender only sees generic message)
+- `contact_removed`: Contact was removed by other party
+- `user_blocked`: User was blocked (no details revealed)
+- `user_unblocked`: User was unblocked
+- `key_changed`: Contact's encryption key changed
+- `contact_verified`: Contact verified via out-of-band
+- `system`: System announcements
+
+---
+
+### Get Notification Count
+
+Get notification badge counts for UI display.
+
+```http
+GET /api/friend/notifications/count
+```
+
+**Response (200 OK):**
+```json
+{
+  "total": 15,
+  "unread": 3,
+  "friend_requests": 2,
+  "security_alerts": 1
+}
+```
+
+---
+
+### Mark Notification Read
+
+Mark a single notification as read.
+
+```http
+POST /api/friend/notifications/{notification_id}/read
+```
+
+**Path Parameters:**
+- `notification_id`: ID of the notification
+
+**Response (200 OK):**
+```json
+{
+  "message": "Notification marked as read"
+}
+```
+
+---
+
+### Mark All Notifications Read
+
+Mark all notifications as read for the authenticated user.
+
+```http
+POST /api/friend/notifications/read-all
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "All notifications marked as read"
+}
+```
+
+---
+
 ### Verify Contact
 
 Mark a contact as verified after out-of-band key verification.
@@ -408,6 +543,51 @@ POST /api/friend/qr-scan
 
 Friend-related real-time notifications are sent via WebSocket:
 
+### Connection Events
+
+When a user connects, the server automatically:
+1. Delivers any pending notifications
+2. Syncs the contact list
+
+### contacts_sync
+
+Sent on connection to sync the sidebar contact list.
+
+```json
+{
+  "type": "contacts_sync",
+  "contacts": [
+    {
+      "user_id": 456,
+      "username": "bob",
+      "fingerprint": "xyz789...",
+      "trust_level": "high",
+      "is_verified": true
+    }
+  ],
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+### notification
+
+Generic notification event for all notification types.
+
+```json
+{
+  "type": "notification",
+  "notification": {
+    "id": 1,
+    "notification_type": "friend_request",
+    "title": "New Friend Request",
+    "message": "alice wants to connect",
+    "payload": {},
+    "related_user_id": 123,
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
 ### friend_request_received
 ```json
 {
@@ -449,7 +629,35 @@ Friend-related real-time notifications are sent via WebSocket:
   "type": "contact_removed",
   "data": {
     "removed_by_user_id": 123,
-    "removed_by_username": "alice"
+    "removed_by_username": "alice",
+    "keys_revoked": true
+  }
+}
+```
+
+### blocked
+
+Sent when a user is blocked (minimal information to protect blocker privacy).
+
+```json
+{
+  "type": "blocked",
+  "data": {
+    "message": "Communication restricted"
+  }
+}
+```
+
+### unblocked
+
+Sent when a user is unblocked.
+
+```json
+{
+  "type": "unblocked",
+  "data": {
+    "unblocker_username": "alice",
+    "message": "Communication restored"
   }
 }
 ```
@@ -465,6 +673,27 @@ Friend-related real-time notifications are sent via WebSocket:
   }
 }
 ```
+
+---
+
+## Notification System
+
+### Notification Persistence
+
+Notifications are stored in the database and delivered via WebSocket when the user is online. If the user is offline, notifications are queued and delivered on next connection.
+
+### Notification Expiry
+
+- Friend requests expire after 48 hours
+- General notifications expire after 30 days
+- Expired notifications are automatically cleaned up
+
+### Anti-Spam Protection
+
+The system tracks rejection patterns to prevent spam:
+- Repeated rejections between the same user pair are logged
+- Users who repeatedly send rejected requests may be rate-limited
+- Rejection reasons are never revealed to the sender (privacy protection)
 
 ---
 
