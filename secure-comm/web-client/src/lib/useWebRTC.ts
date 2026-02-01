@@ -12,6 +12,7 @@ interface UseWebRTCReturn {
   isInCall: boolean;
   isMuted: boolean;
   isVideoOff: boolean;
+  isScreenSharing: boolean;
   callDuration: number;
   
   // Streams (for direct video element binding)
@@ -25,6 +26,7 @@ interface UseWebRTCReturn {
   endCall: () => void;
   toggleMute: () => boolean;
   toggleVideo: () => boolean;
+  toggleScreenShare: () => Promise<boolean>;
   
   // Error
   error: string | null;
@@ -46,6 +48,7 @@ export function useWebRTC(): UseWebRTCReturn {
   
   const isMuted = callState?.isMuted ?? false;
   const isVideoOff = callState?.isVideoOff ?? false;
+  const isScreenSharing = callState?.isScreenSharing ?? false;
   
   // Calculate call duration
   const [callDuration, setCallDuration] = useState(0);
@@ -137,6 +140,10 @@ export function useWebRTC(): UseWebRTCReturn {
     return webrtcService.toggleVideo();
   }, []);
   
+  const toggleScreenShare = useCallback(async (): Promise<boolean> => {
+    return webrtcService.toggleScreenShare();
+  }, []);
+  
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -146,6 +153,7 @@ export function useWebRTC(): UseWebRTCReturn {
     isInCall,
     isMuted,
     isVideoOff,
+    isScreenSharing,
     callDuration,
     localStream,
     remoteStream,
@@ -155,6 +163,7 @@ export function useWebRTC(): UseWebRTCReturn {
     endCall,
     toggleMute,
     toggleVideo,
+    toggleScreenShare,
     error,
     clearError,
   };

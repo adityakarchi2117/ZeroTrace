@@ -68,9 +68,68 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     onClose();
   };
 
+  // Notification settings state
+  const [notifications, setNotifications] = useState({
+    messageNotifications: true,
+    soundNotifications: true,
+  });
+
+  const updateNotification = (key: keyof typeof notifications, value: boolean) => {
+    setNotifications(prev => ({ ...prev, [key]: value }));
+    // Save to localStorage for persistence
+    localStorage.setItem('zerotrace_notifications', JSON.stringify({
+      ...notifications,
+      [key]: value,
+    }));
+  };
+
+  // Load notification settings on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('zerotrace_notifications');
+    if (saved) {
+      try {
+        setNotifications(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to load notification settings:', e);
+      }
+    }
+  }, []);
+
   const exportKeys = () => {
-    // TODO: Implement key export functionality
-    console.log('Exporting keys...');
+    try {
+      // Get keys from localStorage
+      const keyStorage = localStorage.getItem('zerotrace_keys');
+      if (!keyStorage) {
+        alert('No keys found to export');
+        return;
+      }
+      
+      // Parse and create export object
+      const keys = JSON.parse(keyStorage);
+      const exportData = {
+        version: '1.0',
+        exported_at: new Date().toISOString(),
+        user: user?.username,
+        keys: keys,
+        warning: 'Keep this file secure! Anyone with these keys can decrypt your messages.',
+      };
+      
+      // Create and download file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `zerotrace-keys-${user?.username || 'backup'}-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      alert('Keys exported successfully! Store this file in a secure location.');
+    } catch (error) {
+      console.error('Failed to export keys:', error);
+      alert('Failed to export keys. Please try again.');
+    }
   };
 
   if (!isOpen) return null;
@@ -217,7 +276,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                     <input
                       type="checkbox"
-                      defaultChecked
+                      checked={notifications.messageNotifications}
+                      onChange={(e) => updateNotification('messageNotifications', e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                     />
                   </div>
@@ -233,7 +293,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                     <input
                       type="checkbox"
-                      defaultChecked
+                      checked={notifications.soundNotifications}
+                      onChange={(e) => updateNotification('soundNotifications', e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                     />
                   </div>

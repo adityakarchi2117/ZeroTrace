@@ -12,6 +12,7 @@ import SettingsModal from './SettingsModal';
 import AddFriendPanel from './AddFriendPanel';
 import PendingRequestsPanel from './PendingRequestsPanel';
 import BlockedUsersPanel from './BlockedUsersPanel';
+import NotificationToast, { useNotificationToasts } from './NotificationToast';
 import { Lock, Menu, X, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
 export default function ChatApp() {
@@ -26,6 +27,9 @@ export default function ChatApp() {
   const [showPendingRequests, setShowPendingRequests] = useState(false);
   const [showBlockedUsers, setShowBlockedUsers] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  
+  // Notification toast system
+  const { notifications, dismissNotification, showSuccess, showError } = useNotificationToasts();
 
   useEffect(() => {
     loadContacts();
@@ -226,6 +230,13 @@ export default function ChatApp() {
           />
         )}
       </AnimatePresence>
+
+      {/* Notification Toast Container */}
+      <NotificationToast
+        notifications={notifications}
+        onDismiss={dismissNotification}
+        position="top-right"
+      />
     </div>
   );
 }

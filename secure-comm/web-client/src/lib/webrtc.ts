@@ -31,6 +31,7 @@ export interface CallState {
   errorMessage?: string;
   isMuted: boolean;
   isVideoOff: boolean;
+  isScreenSharing: boolean;
 }
 
 export interface CallConfig {
@@ -130,6 +131,7 @@ class WebRTCService {
         isIncoming: true,
         isMuted: false,
         isVideoOff: false,
+        isScreenSharing: false,
       };
       
       this.notifyStateChange();
@@ -426,6 +428,7 @@ class WebRTCService {
         isIncoming: false,
         isMuted: false,
         isVideoOff: false,
+        isScreenSharing: false,
         localStream: this.localStream,
       };
       this.notifyStateChange();
@@ -699,6 +702,128 @@ class WebRTCService {
       return success;
     } catch (error) {
       console.error('❌ Failed to switch camera:', error);
+      return false;
+    }
+  }
+
+  /**
+   * TOGGLE SCREEN SHARING
+   */
+  async toggleScreenShare(): Promise<boolean> {
+    if (!this.pc || !this.localStream) return false;
+    
+    const isCurrentlyScreenSharing = this.currentCall?.isScreenSharing || false;
+    
+    try {
+      if (!isCurrentlyScreenSharing) {
+        // Start screen sharing
+        console.log('🖥️ Starting screen share...');
+        
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+        
+        const screenVideoTrack = screenStream.getVideoTracks()[0];
+        if (!screenVideoTrack) {
+          console.error('❌ No screen video track');
+          return false;
+        }
+        
+        // Handle user stopping screen share via browser UI
+        screenVideoTrack.onended = () => {
+          console.log('🖥️ Screen share stopped by user');
+          this.stopScreenShare();
+        };
+        
+        // Replace video track in peer connection
+        const senders = this.pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        
+        if (videoSender) {
+          // Store original camera track for restoration
+          const originalTrack = this.localStream.getVideoTracks()[0];
+          (this as any).originalCameraTrack = originalTrack;
+          
+          await videoSender.replaceTrack(screenVideoTrack);
+          
+          // Update local stream
+          this.localStream.removeTrack(originalTrack);
+          this.localStream.addTrack(screenVideoTrack);
+          
+          if (this.currentCall) {
+            this.currentCall.isScreenSharing = true;
+            this.currentCall.localStream = this.localStream;
+            this.notifyStateChange();
+          }
+          
+          this.onLocalStream?.(this.localStream);
+          console.log('✅ Screen sharing started');
+          return true;
+        }
+      } else {
+        // Stop screen sharing
+        return this.stopScreenShare();
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('❌ Failed to toggle screen share:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * STOP SCREEN SHARING
+   */
+  private async stopScreenShare(): Promise<boolean> {
+    console.log('🖥️ Stopping screen share...');
+    
+    if (!this.pc || !this.localStream) return false;
+    
+    try {
+      // Get current screen track
+      const currentTrack = this.localStream.getVideoTracks()[0];
+      if (currentTrack) {
+        currentTrack.stop();
+      }
+      
+      // Restore camera track
+      const originalTrack = (this as any).originalCameraTrack;
+      if (originalTrack) {
+        // Get fresh camera stream
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: false,
+        });
+        
+        const cameraTrack = cameraStream.getVideoTracks()[0];
+        
+        const senders = this.pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        
+        if (videoSender && cameraTrack) {
+          await videoSender.replaceTrack(cameraTrack);
+          
+          // Update local stream
+          this.localStream.removeTrack(currentTrack);
+          this.localStream.addTrack(cameraTrack);
+          
+          if (this.currentCall) {
+            this.currentCall.isScreenSharing = false;
+            this.currentCall.localStream = this.localStream;
+            this.notifyStateChange();
+          }
+          
+          this.onLocalStream?.(this.localStream);
+          console.log('✅ Camera restored');
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('❌ Failed to stop screen share:', error);
       return false;
     }
   }

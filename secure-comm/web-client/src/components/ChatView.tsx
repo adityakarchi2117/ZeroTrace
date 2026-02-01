@@ -125,6 +125,7 @@ export default function ChatView() {
     callState,
     isMuted,
     isVideoOff,
+    isScreenSharing,
     callDuration,
     localStream,
     remoteStream,
@@ -134,11 +135,10 @@ export default function ChatView() {
     endCall,
     toggleMute,
     toggleVideo,
+    toggleScreenShare,
     error: callError,
     clearError,
   } = useWebRTC();
-  
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCallChat, setShowCallChat] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
@@ -265,13 +265,6 @@ export default function ChatView() {
     }
   }, [newMessage, currentConversation]);
 
-  // Reset screen sharing when call ends
-  useEffect(() => {
-    if (!callState || callState.status === 'ended' || callState.status === 'failed') {
-      setIsScreenSharing(false);
-    }
-  }, [callState?.status]);
-  
   // Show call errors
   useEffect(() => {
     if (callError) {
@@ -301,29 +294,10 @@ export default function ChatView() {
   };
 
   const handleScreenShare = async () => {
-    if (isScreenSharing) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        webrtcService.replaceVideoTrack(stream.getVideoTracks()[0]);
-        setIsScreenSharing(false);
-      } catch (error) {
-        console.error('Error stopping screen share:', error);
-      }
-    } else {
-      try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        webrtcService.replaceVideoTrack(screenStream.getVideoTracks()[0]);
-        setIsScreenSharing(true);
-
-        screenStream.getVideoTracks()[0].onended = () => {
-          setIsScreenSharing(false);
-          navigator.mediaDevices.getUserMedia({ video: true }).then(camStream => {
-            webrtcService.replaceVideoTrack(camStream.getVideoTracks()[0]);
-          });
-        };
-      } catch (error) {
-        console.error('Error starting screen share:', error);
-      }
+    try {
+      await toggleScreenShare();
+    } catch (error) {
+      console.error('Error toggling screen share:', error);
     }
   };
 

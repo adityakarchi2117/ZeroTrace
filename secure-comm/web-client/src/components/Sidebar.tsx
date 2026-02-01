@@ -8,7 +8,7 @@ import { MotionAvatar } from '@/components/motion';
 import { 
   Lock, Search, Plus, Settings, LogOut, MessageSquare, 
   Shield, User as UserIcon, Loader2, UserPlus, X, Users,
-  ShieldBan, RefreshCw
+  ShieldBan, RefreshCw, Bell
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { friendApi } from '@/lib/friendApi';
@@ -313,6 +313,18 @@ export default function Sidebar({
           </div>
           {!collapsed && (
             <div className="flex items-center gap-1">
+              <button
+                onClick={onPendingRequests}
+                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors relative"
+                title="Notifications"
+              >
+                <Bell className="w-5 h-5" />
+                {pendingRequestCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                    {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                  </span>
+                )}
+              </button>
               <button
                 onClick={onSettings}
                 className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
