@@ -128,10 +128,7 @@ export default function TrustedContactsList({
     setError(null);
 
     try {
-      await friendApi.blockUser({
-        user_id: contact.contact_user_id,
-        reason: 'other',
-      });
+      await friendApi.blockUser(contact.contact_user_id, 'other');
 
       // Update local state
       setContacts((prev) => prev.filter((c) => c.id !== contact.id));
