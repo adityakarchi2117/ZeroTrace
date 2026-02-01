@@ -1,8 +1,10 @@
 'use client';
 
 /**
- * Production-Ready Call View Component
- * Handles video/audio element binding with proper cleanup
+ * Zoom-Style Call View Component
+ * - Remote video: Full screen
+ * - Local video: Draggable floating window
+ * - Click to swap
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -11,7 +13,8 @@ import { CallState } from '@/lib/webrtc';
 import { useAppearance } from '@/lib/useAppearance';
 import {
   Phone, PhoneOff, Mic, MicOff, Video, VideoOff,
-  Monitor, Maximize2, Minimize2, Volume2, VolumeX
+  Monitor, Maximize2, Minimize2, Volume2, VolumeX,
+  PictureInPicture, SwitchCamera
 } from 'lucide-react';
 
 interface CallViewProps {
@@ -30,6 +33,60 @@ interface CallViewProps {
   onEndCall: () => void;
   onRejectCall?: () => void;
   onAnswerCall?: () => void;
+}
+
+// Draggable hook
+function useDraggable(initialPosition: { x: number; y: number }) {
+  const [position, setPosition] = useState(initialPosition);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const elementStart = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    setIsDragging(true);
+    dragStart.current = { x: clientX, y: clientY };
+    elementStart.current = { ...position };
+  }, [position]);
+
+  const handleMouseMove = useCallback((e: MouseEvent | TouchEvent) => {
+    if (!isDragging) return;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    const deltaX = clientX - dragStart.current.x;
+    const deltaY = clientY - dragStart.current.y;
+    
+    // Keep within window bounds
+    const newX = Math.max(16, Math.min(window.innerWidth - 176, elementStart.current.x + deltaX));
+    const newY = Math.max(80, Math.min(window.innerHeight - 136, elementStart.current.y + deltaY));
+    
+    setPosition({ x: newX, y: newY });
+  }, [isDragging]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('touchmove', handleMouseMove);
+      window.addEventListener('touchend', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleMouseMove);
+      window.removeEventListener('touchend', handleMouseUp);
+    };
+  }, [isDragging, handleMouseMove, handleMouseUp]);
+
+  return { position, isDragging, handleMouseDown };
 }
 
 export function CallView({
@@ -52,139 +109,68 @@ export function CallView({
   const { getAccentGradient } = useAppearance();
   const accentGradient = getAccentGradient();
 
-  // Video element refs
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   
-  // Track element binding state
-  const [localVideoReady, setLocalVideoReady] = useState(false);
-  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
-  const [remoteAudioReady, setRemoteAudioReady] = useState(false);
-  
-  // Speaker state
+  const [pipPosition, setPipPosition] = useState({ x: window.innerWidth - 200, y: 100 });
+  const [showLocalInPip, setShowLocalInPip] = useState(true);
   const [isSpeakerOff, setIsSpeakerOff] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Bind local stream to video element
+  const { position, isDragging, handleMouseDown } = useDraggable(pipPosition);
+
+  // Update pipPosition when drag ends
+  useEffect(() => {
+    if (!isDragging) {
+      setPipPosition(position);
+    }
+  }, [position, isDragging]);
+
+  // Bind streams
   useEffect(() => {
     if (localStream && localVideoRef.current) {
-      console.log('📹 Binding local stream to video element');
       localVideoRef.current.srcObject = localStream;
-      
-      // Try to play
-      localVideoRef.current.play().catch(err => {
-        console.warn('⚠️ Local video play failed:', err);
-      });
-      
-      setLocalVideoReady(true);
+      localVideoRef.current.play().catch(() => {});
     }
   }, [localStream]);
 
-  // Bind remote stream to video and audio elements
   useEffect(() => {
     if (remoteStream) {
-      console.log('📹 Binding remote stream:', {
-        tracks: remoteStream.getTracks().map(t => `${t.kind}(${t.readyState})`),
-        active: remoteStream.active,
-        id: remoteStream.id
-      });
-      
-      // Check for audio tracks
-      const audioTracks = remoteStream.getAudioTracks();
-      console.log(`🎵 Remote audio tracks: ${audioTracks.length}`, audioTracks.map(t => t.readyState));
-      
-      // Check for video tracks  
-      const videoTracks = remoteStream.getVideoTracks();
-      console.log(`📹 Remote video tracks: ${videoTracks.length}`, videoTracks.map(t => t.readyState));
-      
-      // Bind to video element
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
-        const playPromise = remoteVideoRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(err => {
-            console.warn('⚠️ Remote video play failed:', err);
-            // Auto-play was prevented, user interaction needed
-          });
-        }
-        setRemoteVideoReady(true);
+        remoteVideoRef.current.play().catch(() => {});
       }
-      
-      // Bind to audio element - CRITICAL for hearing remote audio
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = remoteStream;
-        remoteAudioRef.current.muted = false; // Ensure not muted
-        remoteAudioRef.current.volume = 1.0; // Full volume
-        
-        const playPromise = remoteAudioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log('✅ Remote audio playing');
-          }).catch(err => {
-            console.warn('⚠️ Remote audio play failed (autoplay policy):', err);
-            // Try to play again after user interaction
-            const playAudio = () => {
-              remoteAudioRef.current?.play().catch(() => {});
-              document.removeEventListener('click', playAudio);
-            };
-            document.addEventListener('click', playAudio);
-          });
-        }
-        setRemoteAudioReady(true);
+        remoteAudioRef.current.muted = false;
+        remoteAudioRef.current.volume = 1;
+        remoteAudioRef.current.play().catch(() => {});
       }
     }
   }, [remoteStream]);
 
-  // Handle visibility changes (mobile)
+  // Auto-hide controls
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        console.log('📱 Page hidden - keeping connection alive');
-        // Don't stop anything - let WebRTC handle background
-      } else {
-        console.log('📱 Page visible - resuming video/audio');
-        // Resume playback
-        if (localVideoRef.current && localStream) {
-          localVideoRef.current.play().catch(() => {});
-        }
-        if (remoteVideoRef.current && remoteStream) {
-          remoteVideoRef.current.play().catch(() => {});
-        }
-        // CRITICAL: Resume audio playback
-        if (remoteAudioRef.current && remoteStream) {
-          remoteAudioRef.current.play().catch((err) => {
-            console.warn('⚠️ Could not resume audio:', err);
-          });
-        }
-      }
+    const resetTimeout = () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      setShowControls(true);
+      controlsTimeoutRef.current = setTimeout(() => {
+        if (callState.status === 'connected') setShowControls(false);
+      }, 3000);
     };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [localStream, remoteStream]);
 
-  // Try to play audio when call connects (workaround for autoplay policy)
-  useEffect(() => {
-    if (callState.status === 'connected' && remoteStream && remoteAudioRef.current) {
-      console.log('📞 Call connected - attempting to play audio');
-      const playAudio = () => {
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.play().then(() => {
-            console.log('✅ Audio playing after connection');
-          }).catch((err) => {
-            console.warn('⚠️ Audio autoplay blocked, will retry on user interaction:', err);
-          });
-        }
-      };
-      
-      // Try immediately
-      playAudio();
-      
-      // Also try after a short delay (sometimes helps)
-      const timeout = setTimeout(playAudio, 500);
-      return () => clearTimeout(timeout);
-    }
-  }, [callState.status, remoteStream]);
+    window.addEventListener('mousemove', resetTimeout);
+    window.addEventListener('click', resetTimeout);
+    resetTimeout();
+
+    return () => {
+      window.removeEventListener('mousemove', resetTimeout);
+      window.removeEventListener('click', resetTimeout);
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, [callState.status]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -194,291 +180,215 @@ export function CallView({
 
   const toggleSpeaker = () => {
     if (remoteAudioRef.current) {
-      const newMutedState = !isSpeakerOff;
-      remoteAudioRef.current.muted = newMutedState;
-      console.log(`🔊 Speaker ${newMutedState ? 'muted' : 'unmuted'}`);
-      setIsSpeakerOff(newMutedState);
+      remoteAudioRef.current.muted = !isSpeakerOff;
+      setIsSpeakerOff(!isSpeakerOff);
     }
   };
 
-  const isVideoCall = callState.type === 'video';
-  const hasRemoteVideo = remoteStream?.getVideoTracks().some(t => t.readyState === 'live') ?? false;
-  const hasLocalVideo = localStream?.getVideoTracks().some(t => t.readyState === 'live') ?? false;
-  
-  const showRemoteVideo = isVideoCall && hasRemoteVideo && callState.status === 'connected';
-  const showLocalVideo = isVideoCall && hasLocalVideo && callState.status !== 'ringing';
+  const swapVideos = () => {
+    setShowLocalInPip(!showLocalInPip);
+  };
 
-  // Handle click to enable audio (browser autoplay policy workaround)
-  const handleContainerClick = useCallback(() => {
-    // Try to play audio if it's not already playing
-    if (remoteAudioRef.current && remoteAudioRef.current.paused && remoteStream) {
-      remoteAudioRef.current.play().catch(() => {});
-    }
-  }, [remoteStream]);
+  const isVideoCall = callState.type === 'video';
+  const isRinging = callState.status === 'ringing';
+  const isIncoming = callState.isIncoming;
+  const hasRemoteVideo = remoteStream?.getVideoTracks().some(t => t.readyState === 'live');
+  const hasLocalVideo = localStream?.getVideoTracks().some(t => t.readyState === 'live');
+
+  // Determine which stream goes where
+  const mainStream = showLocalInPip ? remoteStream : localStream;
+  const pipStream = showLocalInPip ? localStream : remoteStream;
+  const mainVideoRef = showLocalInPip ? remoteVideoRef : localVideoRef;
+  const pipVideoRef = showLocalInPip ? localVideoRef : remoteVideoRef;
 
   return (
-    <div 
-      className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden flex flex-col"
-      onClick={handleContainerClick}
-    >
-      {/* Hidden audio element for reliable audio playback */}
-      <audio
-        ref={remoteAudioRef}
-        autoPlay
-        playsInline
-        preload="auto"
-        className="hidden"
-      />
+    <div className="fixed inset-0 w-screen h-screen bg-black z-[9999] overflow-hidden">
+      {/* Audio element */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      {/* Remote Video - Fullscreen Background */}
-      <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        muted // Mute video element (audio plays through separate element)
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
-          showRemoteVideo ? 'opacity-100' : 'opacity-0'
-        }`}
-      />
-
-      {/* Avatar/Status Background - When video not shown */}
-      {!showRemoteVideo && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-gray-900 to-black z-10">
-          <div className="text-center">
-            <motion.div
-              className="w-32 h-32 md:w-48 md:h-48 rounded-full flex items-center justify-center mx-auto mb-6"
-              style={{ background: accentGradient }}
-              animate={callState.status === 'calling' || callState.status === 'ringing' ? {
-                scale: [1, 1.05, 1],
-              } : {}}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              <span className="text-5xl md:text-7xl text-white font-bold">
-                {callState.remoteUsername.charAt(0).toUpperCase()}
-              </span>
-            </motion.div>
-
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
-              {callState.remoteUsername}
-            </h2>
-
-            <p className="text-gray-400 text-lg">
-              {callState.status === 'calling' && 'Calling...'}
-              {callState.status === 'ringing' && (callState.isIncoming ? 'Incoming call...' : 'Ringing...')}
-              {callState.status === 'connecting' && 'Connecting...'}
-              {callState.status === 'connected' && (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  {formatDuration(callDuration)}
-                </span>
-              )}
-            </p>
-            
-            {/* Debug info in development */}
-            {process.env.NODE_ENV === 'development' && (
-              <p className="text-gray-600 text-xs mt-4">
-                Local: {localStream ? '✓' : '✗'} | 
-                Remote: {remoteStream ? '✓' : '✗'} | 
-                State: {callState.status}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 z-50 p-4 md:p-6 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center"
-            style={{ background: accentGradient }}
-          >
-            <span className="text-white font-bold text-lg">
-              {callState.remoteUsername.charAt(0).toUpperCase()}
-            </span>
-          </div>
-          <div>
-            <h3 className="text-white font-medium text-lg">{callState.remoteUsername}</h3>
-            {callState.status === 'connected' && (
-              <span className="text-green-400 text-sm">{formatDuration(callDuration)}</span>
-            )}
-            {isScreenSharing && (
-              <span className="text-blue-400 text-sm flex items-center gap-1 ml-2">
-                <Monitor className="w-3 h-3" /> Presenting
-              </span>
-            )}
-          </div>
-        </div>
-
-        {callState.status === 'connected' && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={toggleSpeaker}
-              className="p-2 md:p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-              title={isSpeakerOff ? "Turn on speaker" : "Turn off speaker"}
-            >
-              {isSpeakerOff ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-            </button>
-            <button
-              onClick={onToggleFullscreen}
-              className="p-2 md:p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-            >
-              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </button>
+      {/* Main Video (Full Screen) */}
+      <div className="absolute inset-0">
+        {mainStream ? (
+          <video
+            ref={mainVideoRef as React.RefObject<HTMLVideoElement>}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover"
+            onClick={swapVideos}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-gray-900 to-black">
+            <div className="text-center">
+              <div className="w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: accentGradient }}>
+                <span className="text-5xl text-white font-bold">{callState.remoteUsername.charAt(0).toUpperCase()}</span>
+              </div>
+              <h2 className="text-white text-2xl font-bold">{callState.remoteUsername}</h2>
+              <p className="text-gray-400 mt-2">{callState.status === 'connecting' ? 'Connecting...' : callState.status === 'calling' ? 'Calling...' : formatDuration(callDuration)}</p>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Local Video - Picture in Picture */}
-      {showLocalVideo && (
+      {/* Draggable PiP Window (like Zoom) */}
+      {isVideoCall && pipStream && (
         <motion.div
-          className="absolute z-40 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 bottom-28 right-4 w-28 h-36 md:bottom-32 md:right-6 md:w-48 md:h-36"
-          initial={{ x: 100, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          className="absolute z-50 rounded-xl overflow-hidden shadow-2xl border-2 border-white/20 bg-black/50 backdrop-blur-sm cursor-move"
+          style={{
+            width: 160,
+            height: 120,
+            left: position.x,
+            top: position.y,
+          }}
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          whileHover={{ borderColor: 'rgba(255,255,255,0.5)' }}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleMouseDown}
+          onClick={(e) => {
+            if (!isDragging) swapVideos();
+          }}
         >
-          {isVideoOff ? (
-            <div className="w-full h-full flex items-center justify-center bg-gray-800">
-              <div
-                className="w-16 h-16 rounded-full flex items-center justify-center"
-                style={{ background: accentGradient }}
-              >
-                <span className="text-2xl text-white font-bold">You</span>
-              </div>
-            </div>
-          ) : (
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          )}
+          <video
+            ref={pipVideoRef as React.RefObject<HTMLVideoElement>}
+            autoPlay
+            playsInline
+            muted={showLocalInPip}
+            className="w-full h-full object-cover"
+          />
+          
+          {/* Swap hint */}
+          <div className="absolute top-1 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/50 rounded-full text-white text-[10px] opacity-0 hover:opacity-100 transition-opacity">
+            Click to swap
+          </div>
 
           {/* Mute indicator */}
-          {isMuted && (
-            <div className="absolute bottom-2 right-2 p-1.5 bg-red-500 rounded-full">
+          {isMuted && showLocalInPip && (
+            <div className="absolute bottom-2 right-2 p-1 bg-red-500 rounded-full">
               <MicOff className="w-3 h-3 text-white" />
             </div>
           )}
-          
-          {/* Stream status indicator */}
-          {!localVideoReady && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            </div>
-          )}
+
+          {/* Drag handle */}
+          <div className="absolute top-1 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/30 rounded-full cursor-move" />
         </motion.div>
       )}
 
+      {/* Top Bar */}
+      <motion.div 
+        className="absolute top-0 left-0 right-0 z-40 p-4 bg-gradient-to-b from-black/80 to-transparent"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: showControls ? 1 : 0, y: showControls ? 0 : -20 }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: accentGradient }}>
+              <span className="text-white font-bold">{callState.remoteUsername.charAt(0).toUpperCase()}</span>
+            </div>
+            <div>
+              <h3 className="text-white font-medium">{callState.remoteUsername}</h3>
+              <span className="text-green-400 text-sm flex items-center gap-1">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                {callState.status === 'connected' ? formatDuration(callDuration) : callState.status}
+              </span>
+            </div>
+          </div>
+
+          {callState.status === 'connected' && (
+            <div className="flex items-center gap-2">
+              <button onClick={toggleSpeaker} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white">
+                {isSpeakerOff ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+              <button onClick={onToggleFullscreen} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white">
+                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+              </button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 left-0 right-0 z-50 p-4 md:p-8 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
-        <div className="flex items-center justify-center gap-3 md:gap-4">
-          {/* Incoming Call Buttons */}
-          {callState.status === 'ringing' && callState.isIncoming && (
+      <motion.div 
+        className="absolute bottom-0 left-0 right-0 z-40 p-6 bg-gradient-to-t from-black/90 via-black/50 to-transparent"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: showControls ? 1 : 0, y: showControls ? 0 : 20 }}
+      >
+        <div className="flex items-center justify-center gap-4">
+          {isRinging && isIncoming ? (
             <>
-              <motion.button
-                onClick={onRejectCall}
-                className="p-4 md:p-5 bg-red-500 rounded-full hover:bg-red-600 transition-all shadow-lg"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <PhoneOff className="w-7 h-7 md:w-8 md:h-8 text-white" />
+              <motion.button onClick={onRejectCall} className="p-5 bg-red-500 rounded-full" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+                <PhoneOff className="w-8 h-8 text-white" />
               </motion.button>
-              <motion.button
-                onClick={onAnswerCall}
-                className="p-4 md:p-5 bg-green-500 rounded-full hover:bg-green-600 transition-all shadow-lg"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                animate={{ scale: [1, 1.05, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                {isVideoCall ? (
-                  <Video className="w-7 h-7 md:w-8 md:h-8 text-white" />
-                ) : (
-                  <Phone className="w-7 h-7 md:w-8 md:h-8 text-white" />
-                )}
+              <motion.button onClick={onAnswerCall} className="p-5 bg-green-500 rounded-full" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+                {isVideoCall ? <Video className="w-8 h-8 text-white" /> : <Phone className="w-8 h-8 text-white" />}
               </motion.button>
             </>
-          )}
-
-          {/* Active Call Controls */}
-          {(callState.status === 'calling' || callState.status === 'connecting' || callState.status === 'connected') && (
+          ) : (
             <>
               {/* Mute */}
-              <motion.button
-                onClick={onToggleMute}
-                className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
-                  isMuted ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
-                }`}
-                whileHover={{ scale: 1.1 }}
+              <motion.button 
+                onClick={onToggleMute} 
+                className={`p-4 rounded-full ${isMuted ? 'bg-red-500' : 'bg-gray-700'}`}
+                whileHover={{ scale: 1.1 }} 
                 whileTap={{ scale: 0.95 }}
               >
-                {isMuted ? (
-                  <MicOff className="w-6 h-6 md:w-7 md:h-7 text-white" />
-                ) : (
-                  <Mic className="w-6 h-6 md:w-7 md:h-7 text-white" />
-                )}
+                {isMuted ? <MicOff className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
               </motion.button>
 
               {/* Video Toggle */}
               {isVideoCall && (
-                <motion.button
-                  onClick={onToggleVideo}
-                  className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
-                    isVideoOff ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  whileHover={{ scale: 1.1 }}
+                <motion.button 
+                  onClick={onToggleVideo} 
+                  className={`p-4 rounded-full ${isVideoOff ? 'bg-red-500' : 'bg-gray-700'}`}
+                  whileHover={{ scale: 1.1 }} 
                   whileTap={{ scale: 0.95 }}
                 >
-                  {isVideoOff ? (
-                    <VideoOff className="w-6 h-6 md:w-7 md:h-7 text-white" />
-                  ) : (
-                    <Video className="w-6 h-6 md:w-7 md:h-7 text-white" />
-                  )}
+                  {isVideoOff ? <VideoOff className="w-6 h-6 text-white" /> : <Video className="w-6 h-6 text-white" />}
                 </motion.button>
               )}
 
               {/* Screen Share */}
               {isVideoCall && callState.status === 'connected' && (
-                <motion.button
-                  onClick={onToggleScreenShare}
-                  className={`p-4 md:p-5 rounded-full transition-all shadow-lg ${
-                    isScreenSharing ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-                  }`}
-                  whileHover={{ scale: 1.1 }}
+                <motion.button 
+                  onClick={onToggleScreenShare} 
+                  className={`p-4 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-gray-700'}`}
+                  whileHover={{ scale: 1.1 }} 
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Monitor className="w-6 h-6 md:w-7 md:h-7 text-white" />
+                  <Monitor className="w-6 h-6 text-white" />
                 </motion.button>
               )}
 
-              {/* End Call */}
-              <motion.button
-                onClick={onEndCall}
-                className="p-4 md:p-5 bg-red-500 rounded-full hover:bg-red-600 transition-all shadow-lg px-6 md:px-8"
-                whileHover={{ scale: 1.05 }}
+              {/* Swap Videos */}
+              <motion.button 
+                onClick={swapVideos} 
+                className="p-4 bg-gray-700 rounded-full"
+                whileHover={{ scale: 1.1 }} 
                 whileTap={{ scale: 0.95 }}
               >
-                <PhoneOff className="w-6 h-6 md:w-7 md:h-7 text-white" />
+                <SwitchCamera className="w-6 h-6 text-white" />
+              </motion.button>
+
+              {/* End Call */}
+              <motion.button 
+                onClick={onEndCall} 
+                className="p-4 bg-red-500 rounded-full px-8"
+                whileHover={{ scale: 1.05 }} 
+                whileTap={{ scale: 0.95 }}
+              >
+                <PhoneOff className="w-6 h-6 text-white" />
               </motion.button>
             </>
           )}
         </div>
 
-        {/* Status Text */}
         <p className="text-center text-gray-400 text-sm mt-4">
-          {callState.status === 'connecting' && 'Establishing secure connection...'}
-          {callState.status === 'calling' && 'Waiting for answer...'}
           {callState.status === 'connected' && (
             <span className="text-green-500 flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full" />
-              Connected
+              <span className="w-2 h-2 bg-green-500 rounded-full" /> Connected
             </span>
           )}
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }

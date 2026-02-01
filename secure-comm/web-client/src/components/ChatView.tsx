@@ -16,6 +16,7 @@ import { webrtcService, CallState } from '@/lib/webrtc';
 import { useWebRTC } from '@/lib/useWebRTC';
 import { EncryptionLock } from '@/lib/motion';
 import { CallView } from './CallView';
+import { SmartCallOverlay } from './SmartCallOverlay';
 import {
   Lock, Send, Smile, Paperclip, Phone, Video,
   MoreVertical, Shield, Check, CheckCheck, Clock,
@@ -1695,6 +1696,24 @@ export default function ChatView() {
           )
         }
       </AnimatePresence>
+
+      {/* Smart Minimize Overlay - Shows when tab switched/app minimized */}
+      <SmartCallOverlay
+        isInCall={!!callState && ['calling', 'ringing', 'connecting', 'connected'].includes(callState.status)}
+        callDuration={callDuration}
+        remoteUsername={callState?.remoteUsername || ''}
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+        isVideoCall={callState?.type === 'video'}
+        onToggleMute={handleToggleMute}
+        onToggleVideo={handleToggleVideo}
+        onEndCall={handleEndCall}
+        onRestore={() => {
+          // Scroll to top to show call UI
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        minimizeOnBlur={true}
+      />
     </div >
   );
 }
