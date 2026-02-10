@@ -393,10 +393,20 @@ async def root():
 @app.get("/health", tags=["Status"])
 async def health_check():
     """Health check endpoint"""
+    try:
+        # Test database connection
+        from app.db.database import SessionLocal
+        db = SessionLocal()
+        db.execute("SELECT 1")
+        db.close()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
     return {
-        "status": "healthy",
-        "database": "connected",
-        "websocket": "active",
+        "status": "healthy" if db_status == "connected" else "unhealthy",
+        "database": db_status,
+        "database_type": "postgresql" if settings.is_postgres else "sqlite",
         "cors_origins": settings.ALLOWED_ORIGINS,
         "environment": settings.ENVIRONMENT,
     }

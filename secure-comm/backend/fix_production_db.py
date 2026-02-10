@@ -1,5 +1,5 @@
 """
-Fix production PostgreSQL database schema for friend_requests table.
+Fix production PostgreSQL database schema.
 Run this on Render or any PostgreSQL deployment.
 """
 import os
@@ -8,22 +8,65 @@ import secrets
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 
-def fix_friend_requests_schema():
+def fix_users_table(engine):
+    """Add missing columns to users table."""
+    print("\n=== Fixing users table ===")
+    
+    with engine.connect() as conn:
+        inspector = inspect(engine)
+        
+        # Check if users table exists
+        tables = inspector.get_table_names()
+        if 'users' not in tables:
+            print("⚠️ Users table does not exist! Will be created by SQLAlchemy.")
+            return
+        
+        # Get current columns
+        columns = {col['name']: col for col in inspector.get_columns('users')}
+        print(f"Current columns: {list(columns.keys())}")
+        
+        # Add missing columns
+        migrations = []
+        
+        if 'is_disabled' not in columns:
+            migrations.append("ADD COLUMN is_disabled BOOLEAN DEFAULT FALSE")
+            print("-> Will add: is_disabled")
+        
+        if 'disabled_at' not in columns:
+            migrations.append("ADD COLUMN disabled_at TIMESTAMP")
+            print("-> Will add: disabled_at")
+        
+        if 'settings' not in columns:
+            migrations.append("ADD COLUMN settings JSON")
+            print("-> Will add: settings")
+        
+        if 'last_username_change' not in columns:
+            migrations.append("ADD COLUMN last_username_change TIMESTAMP")
+            print("-> Will add: last_username_change")
+        
+        if 'previous_usernames' not in columns:
+            migrations.append("ADD COLUMN previous_usernames JSON")
+            print("-> Will add: previous_usernames")
+        
+        # Execute migrations
+        if migrations:
+            print(f"\nExecuting {len(migrations)} migrations on users table...")
+            for migration in migrations:
+                sql = f"ALTER TABLE users {migration}"
+                print(f"  {sql}")
+                try:
+                    conn.execute(text(sql))
+                except Exception as e:
+                    print(f"  Error: {e}")
+            
+            conn.commit()
+            print("✅ Users table migration completed!")
+        else:
+            print("✅ All columns already exist in users table.")
+
+def fix_friend_requests_schema(engine):
     """Fix the friend_requests table schema."""
-    
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        print("ERROR: DATABASE_URL not set")
-        sys.exit(1)
-    
-    # Convert asyncpg URL to psycopg2 if needed
-    if database_url.startswith("postgresql+asyncpg://"):
-        database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
-    elif database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-    
-    print(f"Connecting to database...")
-    engine = create_engine(database_url)
+    print("\n=== Fixing friend_requests table ===")
     
     with engine.connect() as conn:
         # First check if friend_requests table exists
@@ -248,9 +291,33 @@ def fix_friend_requests_schema():
 
 if __name__ == "__main__":
     try:
-        fix_friend_requests_schema()
+        # Get database URL
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            print("ERROR: DATABASE_URL not set")
+            sys.exit(1)
+        
+        # Convert asyncpg URL to psycopg2 if needed
+        if database_url.startswith("postgresql+asyncpg://"):
+            database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        elif database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        
+        print(f"Connecting to database...")
+        engine = create_engine(database_url)
+        
+        # Fix users table
+        fix_users_table(engine)
+        
+        # Fix friend_requests table
+        fix_friend_requests_schema(engine)
+        
+        print("\n" + "="*60)
+        print("✅ ALL DATABASE MIGRATIONS COMPLETED SUCCESSFULLY!")
+        print("="*60)
+        
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"\n❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
