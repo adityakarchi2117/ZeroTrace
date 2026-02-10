@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # ============ Database ============
     # Defaults to SQLite for local dev, override with DATABASE_URL env var for PostgreSQL
-    DATABASE_URL: str = Field(default="sqlite:///./secure_comm.db")
+    DATABASE_URL: str = Field(default="sqlite:///./zerotrace_v3.db")
     
     # ============ CORS - Env vars for configuration ============
     CORS_ORIGINS: str = Field(default="", description="Comma-separated or JSON list of allowed origins")

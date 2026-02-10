@@ -512,7 +512,7 @@ export const useStore = create<AppState>()(
             public_key: tc.public_key,
             identity_key: tc.identity_key,
             nickname: tc.nickname,
-            is_blocked: tc.is_blocked ?? false,
+            is_blocked: false,
             is_verified: tc.is_verified,
             added_at: tc.created_at,
           }));
