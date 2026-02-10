@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useStore } from '@/lib/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ParticleField } from '@/lib/motion';
@@ -12,6 +12,7 @@ import SettingsModal from './SettingsModal';
 import AddFriendPanel from './AddFriendPanel';
 import PendingRequestsPanel from './PendingRequestsPanel';
 import BlockedUsersPanel from './BlockedUsersPanel';
+import ProfilePage from './ProfilePage';
 import NotificationToast, { useNotificationToasts } from './NotificationToast';
 import { Lock, Menu, X, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
@@ -26,33 +27,46 @@ export default function ChatApp() {
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showPendingRequests, setShowPendingRequests] = useState(false);
   const [showBlockedUsers, setShowBlockedUsers] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   
   // Notification toast system
-  const { notifications, dismissNotification, showSuccess, showError, showMessage } = useNotificationToasts();
+  const {
+    notifications,
+    dismissNotification,
+    pauseTimer,
+    resumeTimer,
+    addNotification,
+    showFriendRequest,
+    showFriendAccepted,
+    showFriendRejected,
+    showContactRemoved,
+    showKeyChanged,
+    showSuccess,
+    showError,
+    showMessage,
+  } = useNotificationToasts();
 
-  // Track last message IDs to detect new messages
-  const [lastMessageIds, setLastMessageIds] = useState<Set<number>>(new Set());
+  // Use a ref instead of state for lastMessageIds to avoid re-render loops
+  const lastMessageIdsRef = useRef<Set<number>>(new Set());
 
-  // Show toast notifications for new messages
+  // Show toast notifications for new messages (performance-optimized)
   useEffect(() => {
     if (!user) return;
     
     messages.forEach((conversationMessages, username) => {
-      // Skip if this is the current conversation
       if (username === currentConversation) return;
       
       conversationMessages.forEach((msg) => {
-        // Only show notification for new messages not from current user
-        if (!lastMessageIds.has(msg.id) && msg.sender_username !== user.username) {
-          // Add to tracked IDs
-          setLastMessageIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(msg.id);
-            return newSet;
-          });
+        if (!lastMessageIdsRef.current.has(msg.id) && msg.sender_username !== user.username) {
+          lastMessageIdsRef.current.add(msg.id);
           
-          // Show toast notification
+          // Keep set bounded
+          if (lastMessageIdsRef.current.size > 500) {
+            const first = lastMessageIdsRef.current.values().next().value;
+            if (first !== undefined) lastMessageIdsRef.current.delete(first);
+          }
+          
           const messageText = msg._decryptedContent || 
             (msg.message_type === 'image' ? '📷 Image' : 'New message');
           
@@ -62,7 +76,44 @@ export default function ChatApp() {
         }
       });
     });
-  }, [messages, currentConversation, user, showMessage, setCurrentConversation, lastMessageIds]);
+  }, [messages, currentConversation, user, showMessage, setCurrentConversation]);
+
+  // Listen for WebSocket toast events (friend requests, blocks, key changes, etc.)
+  useEffect(() => {
+    const handleToast = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.type) return;
+
+      switch (detail.type) {
+        case 'friend_request':
+          showFriendRequest(detail.username || 'Someone');
+          break;
+        case 'friend_request_accepted':
+          showFriendAccepted(detail.username || 'Someone');
+          break;
+        case 'friend_request_rejected':
+          showFriendRejected(detail.username || 'Someone');
+          break;
+        case 'contact_removed':
+          showContactRemoved(detail.username || 'Someone');
+          break;
+        case 'key_changed':
+          showKeyChanged(detail.username || 'Unknown');
+          break;
+        case 'user_blocked':
+          addNotification({ type: 'user_blocked', title: detail.title || 'You were blocked', message: detail.message });
+          break;
+        case 'user_unblocked':
+          addNotification({ type: 'user_unblocked', title: detail.title || 'Unblocked', message: detail.message });
+          break;
+        default:
+          addNotification({ type: detail.type, title: detail.title || 'Notification', message: detail.message });
+      }
+    };
+
+    window.addEventListener('zerotrace-toast', handleToast);
+    return () => window.removeEventListener('zerotrace-toast', handleToast);
+  }, [showFriendRequest, showFriendAccepted, showFriendRejected, showContactRemoved, showKeyChanged, addNotification]);
 
   useEffect(() => {
     loadContacts();
@@ -156,6 +207,7 @@ export default function ChatApp() {
           onAddFriend={() => setShowAddFriend(true)}
           onPendingRequests={() => setShowPendingRequests(true)}
           onBlockedUsers={() => setShowBlockedUsers(true)}
+          onProfile={() => setShowProfile(true)}
         />
       </motion.div>
 
@@ -255,6 +307,11 @@ export default function ChatApp() {
         isOpen={showBlockedUsers}
         onClose={() => setShowBlockedUsers(false)}
       />
+      {showProfile && (
+        <ProfilePage
+          onClose={() => setShowProfile(false)}
+        />
+      )}
 
       {/* Mobile Overlay */}
       <AnimatePresence>
@@ -273,6 +330,8 @@ export default function ChatApp() {
       <NotificationToast
         notifications={notifications}
         onDismiss={dismissNotification}
+        onPause={pauseTimer}
+        onResume={resumeTimer}
         position="top-right"
       />
     </div>

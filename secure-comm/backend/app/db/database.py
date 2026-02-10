@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Enum, Index, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Enum, Index, JSON
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from datetime import datetime
 import enum
@@ -76,6 +76,27 @@ class VaultItemTypeEnum(str, enum.Enum):
     CUSTOM = "custom"
 
 
+class VisibilityLevel(str, enum.Enum):
+    EVERYONE = "everyone"
+    FRIENDS = "friends"
+    NOBODY = "nobody"
+
+
+class VerificationTypeEnum(str, enum.Enum):
+    IDENTITY = "identity"
+    EMAIL = "email"
+    PHONE = "phone"
+    ORGANIZATION = "organization"
+    CUSTOM = "custom"
+
+
+class VerificationStatusEnum(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
 # ============ Database Models ============
 
 class User(Base):
@@ -96,9 +117,16 @@ class User(Base):
     # Account status
     is_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    is_disabled = Column(Boolean, default=False)  # User-initiated disable
+    disabled_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, nullable=True)
     settings = Column(JSON, nullable=True)  # User preferences (theme, etc.)
+    
+    # Username change tracking
+    last_username_change = Column(DateTime, nullable=True)
+    previous_usernames = Column(JSON, nullable=True)  # List of previous usernames
     
     # Relationships
     devices = relationship("Device", back_populates="user", cascade="all, delete-orphan")
@@ -109,6 +137,8 @@ class User(Base):
     contacts = relationship("Contact", foreign_keys="Contact.user_id", back_populates="user")
     initiated_calls = relationship("CallLog", foreign_keys="CallLog.caller_id", back_populates="caller")
     received_calls = relationship("CallLog", foreign_keys="CallLog.receiver_id", back_populates="receiver")
+    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    privacy = relationship("PrivacySettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('ix_users_identity_key', 'identity_key'),
@@ -146,6 +176,52 @@ class CallLog(Base):
     
     caller = relationship("User", foreign_keys=[caller_id], back_populates="initiated_calls")
     receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_calls")
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    display_name = Column(String(100), nullable=True)
+    bio = Column(Text, nullable=True)
+    birthday = Column(Date, nullable=True)
+    location_city = Column(String(120), nullable=True)
+    website = Column(String(255), nullable=True)
+    social_links = Column(JSON, nullable=True)
+    status_message = Column(String(160), nullable=True)
+    pronouns = Column(String(32), nullable=True)
+    emoji_badge = Column(String(16), nullable=True)
+    theme = Column(JSON, nullable=True)
+    banner_url = Column(String(512), nullable=True)
+    avatar_url = Column(String(512), nullable=True)
+    avatar_blur = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="profile")
+
+
+class PrivacySettings(Base):
+    __tablename__ = "privacy_settings"
+    
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    
+    profile_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    avatar_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    field_visibility = Column(JSON, nullable=True)  # granular per-field map
+    
+    last_seen_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    online_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    typing_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    read_receipts_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    
+    discovery_opt_in = Column(Boolean, default=True)
+    message_request_policy = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="privacy")
 
 
 class Device(Base):
@@ -316,6 +392,114 @@ class RefreshToken(Base):
     __table_args__ = (
         Index('ix_refresh_token_user_device', 'user_id', 'device_id'),
     )
+
+
+class VerificationBadge(Base):
+    """User verification badges"""
+    __tablename__ = "verification_badges"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    verification_type = Column(Enum(VerificationTypeEnum), nullable=False)
+    badge_label = Column(String(100), nullable=True)  # Custom label for custom badges
+    badge_color = Column(String(20), nullable=True)  # Hex color for badge
+    verified_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)  # For temporary verifications
+    verified_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Admin who verified
+    verification_data = Column(JSON, nullable=True)  # Store verification metadata
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", foreign_keys=[user_id])
+    verifier = relationship("User", foreign_keys=[verified_by], passive_deletes=True)
+    
+    __table_args__ = (
+        Index('ix_verification_badges_user_id', 'user_id'),
+        Index('ix_verification_badges_type', 'verification_type'),
+    )
+
+
+class VerificationRequest(Base):
+    """Verification requests from users"""
+    __tablename__ = "verification_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    verification_type = Column(Enum(VerificationTypeEnum), nullable=False)
+    status = Column(Enum(VerificationStatusEnum), default=VerificationStatusEnum.PENDING)
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    supporting_documents = Column(JSON, nullable=True)  # URLs to uploaded documents
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", foreign_keys=[user_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by], passive_deletes=True)
+    
+    __table_args__ = (
+        Index('ix_verification_requests_user_id', 'user_id'),
+        Index('ix_verification_requests_status', 'status'),
+    )
+
+
+class VerificationHistory(Base):
+    """Audit trail for verification actions"""
+    __tablename__ = "verification_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    verification_type = Column(Enum(VerificationTypeEnum), nullable=False)
+    action = Column(String(50), nullable=False)  # 'granted', 'revoked', 'expired'
+    performed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = Column(Text, nullable=True)
+    meta = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", foreign_keys=[user_id])
+    performer = relationship("User", foreign_keys=[performed_by], passive_deletes=True)
+    
+    __table_args__ = (
+        Index('ix_verification_history_user_id', 'user_id'),
+    )
+
+
+class ProfileHistory(Base):
+    """Audit trail for profile changes with rollback support"""
+    __tablename__ = "profile_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    changed_fields = Column(JSON, nullable=False, default=list)
+    snapshot = Column(JSON, nullable=False, default=dict)
+    change_source = Column(String(50), nullable=False, default="user")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index('ix_profile_history_user_id', 'user_id'),
+    )
+
+
+class ProfileReport(Base):
+    """Reports against user profiles"""
+    __tablename__ = "profile_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_id = Column(String(64), unique=True, nullable=False)
+    reporter_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reported_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(50), nullable=False)
+    description = Column(Text, nullable=True)
+    evidence_snapshot = Column(JSON, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    reporter = relationship("User", foreign_keys=[reporter_id])
+    reported_user = relationship("User", foreign_keys=[reported_user_id])
 
 
 def get_db():

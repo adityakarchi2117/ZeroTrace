@@ -243,6 +243,13 @@ class ConnectionManager:
             notifications = repo.get_undelivered_notifications(user_id)
             
             for notif in notifications:
+                # Resolve related user's username so frontend can display it
+                related_username = None
+                if notif.related_user_id:
+                    related_user = db.query(User).filter(User.id == notif.related_user_id).first()
+                    if related_user:
+                        related_username = related_user.username
+
                 notification_data = {
                     "type": "notification",
                     "notification_id": notif.id,
@@ -251,6 +258,7 @@ class ConnectionManager:
                     "message": notif.message,
                     "payload": notif.payload,
                     "related_user_id": notif.related_user_id,
+                    "related_username": related_username,
                     "created_at": notif.created_at.isoformat() if notif.created_at else None,
                     "timestamp": datetime.utcnow().isoformat()
                 }

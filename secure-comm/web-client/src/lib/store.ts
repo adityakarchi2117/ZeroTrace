@@ -6,6 +6,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, User, Contact, Conversation, Message, CallLog } from './api';
+import profileApi from './profileApi';
+import { Profile, PrivacySettings } from './profileTypes';
 import { friendApi } from './friendApi';
 import {
   generateKeyPair,
@@ -22,6 +24,9 @@ import { wsManager } from './websocket';
 import { localStorageManager, StoredMessage, StoredConversation, StoredContact } from './storage';
 import { buildCurrentMessageTheme } from './themeSync';
 import { playMessageSound, initAudioContext } from './sound';
+import { secureProfileService } from './secureProfileApi';
+import { deviceLinkService } from './deviceLinkService';
+import { LegacyMigrationHandler } from './encryptedVault';
 
 interface AuthState {
   user: User | null;
@@ -41,25 +46,25 @@ interface CryptoState {
 interface ChatState {
   contacts: Contact[];
   conversations: Conversation[];
-  currentConversation: string | null; // username
-  messages: Map<string, Message[]>; // username -> messages
+  currentConversation: string | null;
+  messages: Map<string, Message[]>;
   onlineUsers: Set<number>;
-  typingUsers: Map<string, boolean>; // username -> isTyping
+  typingUsers: Map<string, boolean>;
   callHistory: CallLog[];
 }
 
 interface AppState extends AuthState, CryptoState, ChatState {
-  // Auth actions
+  profile: Profile | null;
+  privacy: PrivacySettings | null;
+
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   loadStoredAuth: () => Promise<void>;
 
-  // Crypto actions
   generateAndUploadKeys: () => Promise<void>;
   loadStoredKeys: () => void;
 
-  // Chat actions
   loadContacts: () => Promise<void>;
   loadConversations: () => Promise<void>;
   loadMessages: (username: string) => Promise<void>;
@@ -75,8 +80,16 @@ interface AppState extends AuthState, CryptoState, ChatState {
   addIncomingMessage: (message: Message) => Promise<void>;
   loadCallHistory: () => Promise<void>;
   loadPendingRequests: () => Promise<void>;
+  loadProfile: (userId?: number) => Promise<void>;
+  updateProfile: (data: Partial<Profile>) => Promise<void>;
+  updatePrivacy: (data: Partial<PrivacySettings>) => Promise<void>;
+  loadPrivacy: () => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  blockUser: (username: string) => Promise<void>;
+  unblockUser: (username: string) => Promise<void>;
+  removeAvatar: () => Promise<void>;
+  reportUser: (username: string, reason: string, description?: string) => Promise<string>;
 
-  // Deletion actions
   deleteMessageForMe: (messageId: number, conversationUsername: string) => Promise<void>;
   deleteMessageForEveryone: (messageId: number, conversationUsername: string) => Promise<void>;
   clearChat: (username: string) => Promise<void>;
@@ -84,11 +97,9 @@ interface AppState extends AuthState, CryptoState, ChatState {
   handleRemoteDeleteMessage: (messageId: number, senderUsername: string) => void;
   handleRemoteDeleteConversation: (senderUsername: string) => void;
 
-  // Presence
   setUserOnline: (userId: number, isOnline: boolean) => void;
   setUserTyping: (username: string, isTyping: boolean) => void;
 
-  // Clear state
   clearError: () => void;
   initializeWebSocket: () => void;
 }
@@ -96,7 +107,7 @@ interface AppState extends AuthState, CryptoState, ChatState {
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
-      // Initial state
+
       user: null,
       token: null,
       isAuthenticated: false,
@@ -113,18 +124,17 @@ export const useStore = create<AppState>()(
       onlineUsers: new Set(),
       typingUsers: new Map(),
       callHistory: [],
-
-      // ============ Auth Actions ============
+      profile: null,
+      privacy: null,
 
       login: async (username: string, password: string) => {
         set({ isLoading: true, error: null });
         try {
           const response = await api.login(username, password);
-          // Set token for friend API as well
+
           friendApi.setToken(response.access_token);
           let user = await api.getCurrentUser();
 
-          // Sync settings from server
           if (user.settings) {
             try {
               const existing = localStorage.getItem('zerotrace_appearance');
@@ -134,7 +144,6 @@ export const useStore = create<AppState>()(
 
               localStorage.setItem('zerotrace_appearance', newValue);
 
-              // Dispatch proper StorageEvent for current window listeners
               window.dispatchEvent(new StorageEvent('storage', {
                 key: 'zerotrace_appearance',
                 newValue: newValue,
@@ -146,16 +155,13 @@ export const useStore = create<AppState>()(
             }
           }
 
-          // Store token
           localStorage.setItem('zerotrace_token', response.access_token);
           localStorage.setItem('zerotrace_username', username);
 
-          // Load or generate keys
           let keys = KeyStorage.load(username);
           let needsUpload = !user.public_key;
           let keyMismatch = false;
 
-          // Verify key consistency if both local and server keys exist
           if (keys && user.public_key) {
             const isConsistent = KeyStorage.verifyKeyConsistency(username, user.public_key);
             if (!isConsistent) {
@@ -163,17 +169,17 @@ export const useStore = create<AppState>()(
               console.warn('This may happen if you logged in from a different device.');
               console.warn('Old messages encrypted with the server key may not decrypt correctly.');
               keyMismatch = true;
-              // Keep local keys but mark the mismatch
+
             }
           }
 
           if (!keys) {
-            // Generate new proper key bundle
+
             console.log('🔐 Generating new key bundle...');
             const { bundle, privateKeys } = generateKeyBundle(5);
 
             keys = {
-              privateKey: privateKeys.signedPrekeyPrivate, // Use signed prekey private for encryption
+              privateKey: privateKeys.signedPrekeyPrivate,
               publicKey: bundle.publicKey,
               identityKey: bundle.identityKey,
               signedPrekey: bundle.signedPrekey,
@@ -186,28 +192,24 @@ export const useStore = create<AppState>()(
             console.log('✅ Key bundle generated');
           }
 
-          // CRITICAL: Verify that privateKey and publicKey form a valid pair
           if (keys.privateKey && keys.publicKey) {
             const isValidPair = verifyKeyPair(keys.privateKey, keys.publicKey);
             console.log('🔑 Key pair verification:', isValidPair ? '✅ VALID' : '❌ INVALID');
 
             if (!isValidPair) {
-              // The stored public key doesn't match the private key!
-              // Derive the correct public key from the private key
+
               console.warn('⚠️ Key pair mismatch detected! Deriving correct public key...');
               const correctPublicKey = derivePublicKeyFromPrivate(keys.privateKey);
               console.log('🔧 Original publicKey:', keys.publicKey?.substring(0, 30));
               console.log('🔧 Derived publicKey:', correctPublicKey?.substring(0, 30));
 
-              // Update the keys with the correct public key
               keys.publicKey = correctPublicKey;
               KeyStorage.save(username, keys);
-              needsUpload = true; // Need to upload the corrected key
+              needsUpload = true;
               console.log('✅ Key pair corrected and saved');
             }
           }
 
-          // Upload keys if not on server OR if we corrected the key pair
           if (needsUpload && keys) {
             console.log('📤 Uploading keys to server...', {
               publicKeyToUpload: keys.publicKey?.substring(0, 30),
@@ -220,7 +222,7 @@ export const useStore = create<AppState>()(
                 signed_prekey_signature: keys.signedPrekeySignature || '',
                 one_time_prekeys: keys.oneTimePrekeys || [],
               });
-              // Refresh user to get updated public_key
+
               user = await api.getCurrentUser();
               console.log('✅ Keys uploaded successfully!', {
                 serverNowHas: user.public_key?.substring(0, 30),
@@ -230,7 +232,6 @@ export const useStore = create<AppState>()(
             }
           }
 
-          // Final verification: ensure local key matches server key
           const localServerMatch = keys?.publicKey === user.public_key;
           console.log('🔐 Final Key Status:', {
             username,
@@ -268,13 +269,42 @@ export const useStore = create<AppState>()(
             identityKey: keys.identityKey || null,
           });
 
-          // Connect WebSocket
           wsManager.connect(user.id.toString(), response.access_token);
 
-          // Setup message handlers
           if (!(window as any)._wsHandlersRegistered) {
             setupWebSocketHandlers(get, set);
             (window as any)._wsHandlersRegistered = true;
+          }
+
+          // Load profile so display_name, avatar, bio etc. are available in state
+          get().loadProfile().catch(err => console.warn('⚠️ Profile load on login (non-fatal):', err));
+
+          // Initialize secure profile system (DEK, encrypted profile restore)
+          if (keys?.publicKey && keys?.privateKey) {
+            secureProfileService.initializeOnLogin(
+              username,
+              keys.publicKey,
+              keys.privateKey,
+            ).then(ok => {
+              if (ok) console.log('🔐 Secure profile system initialized');
+              else console.warn('⚠️ Secure profile init returned false');
+            }).catch(err => {
+              console.warn('⚠️ Secure profile init error (non-fatal):', err);
+            });
+
+            // Register primary device & restore keys on login
+            deviceLinkService.registerPrimaryDevice(username)
+              .then(() => deviceLinkService.restoreKeysOnLogin(username))
+              .then(({ dekBundle, sessionKeyCount, deviceAuthorized }) => {
+                console.log(`📱 Device sync: authorized=${deviceAuthorized}, sessions=${sessionKeyCount}`);
+                // Migrate legacy session keys if needed
+                if (LegacyMigrationHandler.needsMigration()) {
+                  LegacyMigrationHandler.migrate(username).then(report => {
+                    console.log(`📦 Legacy migration: ${report.sessionKeysMigrated} keys migrated`);
+                  }).catch(err => console.warn('⚠️ Legacy migration error:', err));
+                }
+              })
+              .catch(err => console.warn('⚠️ Device sync init error (non-fatal):', err));
           }
 
         } catch (error: any) {
@@ -292,7 +322,6 @@ export const useStore = create<AppState>()(
           const deviceId = `web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           await api.register(username, email, password, deviceId);
 
-          // Auto-login after registration
           await get().login(username, password);
 
         } catch (error: any) {
@@ -333,10 +362,9 @@ export const useStore = create<AppState>()(
       initializeWebSocket: () => {
         const { user, token } = get();
         if (user && token) {
-          // Connect WebSocket
+
           wsManager.connect(user.id.toString(), token);
 
-          // Setup handlers only once using a module-level flag
           const globalWindow = window as any;
           if (!globalWindow._zerotraceWsHandlersRegistered) {
             setupWebSocketHandlers(get, set);
@@ -356,7 +384,6 @@ export const useStore = create<AppState>()(
           try {
             const user = await api.getCurrentUser();
 
-            // Sync settings from server
             if (user.settings) {
               try {
                 const existing = localStorage.getItem('cipherlink_appearance');
@@ -366,7 +393,6 @@ export const useStore = create<AppState>()(
 
                 localStorage.setItem('cipherlink_appearance', newValue);
 
-                // Dispatch proper StorageEvent for current window listeners
                 window.dispatchEvent(new StorageEvent('storage', {
                   key: 'cipherlink_appearance',
                   newValue: newValue,
@@ -389,31 +415,46 @@ export const useStore = create<AppState>()(
               identityKey: keys?.identityKey || null,
             });
 
-            // Connect WebSocket
             wsManager.connect(user.id.toString(), token);
 
-            // Setup message handlers
             if (!(window as any)._wsHandlersRegistered) {
               setupWebSocketHandlers(get, set);
               (window as any)._wsHandlersRegistered = true;
             }
 
-            // Load persistent data from IndexedDB
+            // Initialize secure profile on session restore
+            if (keys?.publicKey && keys?.privateKey) {
+              secureProfileService.initializeOnLogin(
+                username,
+                keys.publicKey,
+                keys.privateKey,
+              ).catch(err => {
+                console.warn('⚠️ Secure profile init error (non-fatal):', err);
+              });
+
+              // Restore device keys on session reload
+              deviceLinkService.restoreKeysOnLogin(username)
+                .then(({ dekBundle, sessionKeyCount, deviceAuthorized }) => {
+                  console.log(`📱 Session restore: device authorized=${deviceAuthorized}, sessions=${sessionKeyCount}`);
+                })
+                .catch(err => console.warn('⚠️ Device key restore error (non-fatal):', err));
+            }
+
+            // Load profile so display_name, avatar, bio etc. are available in state
+            get().loadProfile().catch(err => console.warn('⚠️ Profile load on restore (non-fatal):', err));
+
             await get().loadPersistedData();
 
-            // Sync with server in background
             get().syncWithServer().catch(console.error);
 
             return;
           } catch {
-            // Token expired or invalid
+
             localStorage.removeItem('zerotrace_token');
             localStorage.removeItem('zerotrace_username');
           }
         }
       },
-
-      // ============ Crypto Actions ============
 
       generateAndUploadKeys: async () => {
         const { user } = get();
@@ -422,14 +463,12 @@ export const useStore = create<AppState>()(
         const keyPair = generateKeyPair();
         const signingPair = generateSigningKeyPair();
 
-        // Save locally
         KeyStorage.save(user.username, {
           privateKey: keyPair.privateKey,
           publicKey: keyPair.publicKey,
           identityKey: signingPair.publicKey,
         });
 
-        // Upload to server
         await api.uploadKeys({
           public_key: keyPair.publicKey,
           identity_key: signingPair.publicKey,
@@ -459,33 +498,30 @@ export const useStore = create<AppState>()(
         }
       },
 
-      // ============ Chat Actions ============
-
       loadContacts: async () => {
         try {
-          // Load trusted contacts from friend system (primary source)
+
           const trustedContacts = await friendApi.getTrustedContacts();
-          
-          // Map trusted contacts to the Contact interface
+
           const contacts: Contact[] = trustedContacts.map(tc => ({
             id: tc.id,
             user_id: tc.user_id,
             contact_id: tc.contact_user_id,
             contact_username: tc.contact_username,
-            contact_email: '', // Not available in TrustedContact
+            contact_email: '',
             public_key: tc.public_key,
             identity_key: tc.identity_key,
             nickname: tc.nickname,
-            is_blocked: false, // Blocked users are separate
+            is_blocked: tc.is_blocked ?? false,
             is_verified: tc.is_verified,
             added_at: tc.created_at,
           }));
-          
+
           set({ contacts });
           console.log(`✅ Loaded ${contacts.length} trusted contacts`);
         } catch (error) {
           console.error('Failed to load contacts:', error);
-          // Fallback to old contacts API if friend system fails
+
           try {
             const contacts = await api.getContacts();
             set({ contacts });
@@ -509,12 +545,9 @@ export const useStore = create<AppState>()(
           const messages = await api.getConversation(username);
           console.log(`📥 Loaded ${messages.length} messages from server for ${username}`);
 
-          // Get current messages to merge with (prevent duplication)
           const currentMessages = get().messages.get(username) || [];
           const existingIds = new Set(currentMessages.map(m => m.id));
 
-          // 1. First Pass: Merge NEW messages as ENCRYPTED (Optimistic UI Update)
-          // This ensures the UI shows something immediately while we decrypt in background
           const newEncryptedMessages = [];
           for (const msg of messages) {
             if (!existingIds.has(msg.id)) {
@@ -524,7 +557,7 @@ export const useStore = create<AppState>()(
 
           if (newEncryptedMessages.length > 0) {
             const optimisticallyMergedMessages = [...currentMessages, ...newEncryptedMessages];
-            // Sort by timestamp
+
             optimisticallyMergedMessages.sort((a, b) =>
               new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             );
@@ -534,12 +567,10 @@ export const useStore = create<AppState>()(
             set({ messages: optimisticMap });
           }
 
-          // 2. Second Pass: Decrypt messages in background (non-blocking if possible)
-          const { privateKey, contacts, user } = get();
+          const { privateKey, contacts, user, publicKey } = get();
 
           if (privateKey) {
-            // Fetch the contact's public key from server to use as fallback
-            // This ensures decryption works even if contacts aren't loaded yet
+
             let contactPublicKey: string | undefined;
             try {
               const keyData = await api.getPublicKey(username);
@@ -547,32 +578,27 @@ export const useStore = create<AppState>()(
               console.log(`📥 Got public key for ${username}:`, contactPublicKey?.substring(0, 30));
             } catch (e) {
               console.warn(`Could not fetch public key for ${username}:`, e);
-              // Fall back to contacts array
+
               const contact = contacts.find(c => c.contact_username === username);
               contactPublicKey = contact?.public_key;
             }
 
-            // Decrypt ALL messages from server response that need it
             for (const msg of messages) {
-              // Only decrypt if we haven't already
+
               if (msg.encrypted_content && !msg._decryptedContent) {
                 try {
                   const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
+                  const isMine = msg.sender_username === user?.username;
 
-                  // v2 protocol: senderPublicKey is embedded in message
-                  // v1 protocol: use contact's cached public key as fallback
-                  let fallbackPublicKey: string | undefined;
+                  // For both sent and received messages, the contact's public key is correct:
+                  // - Sent: I encrypted with (contactPub, myPriv), decrypt needs (contactPub, myPriv)
+                  // - Received: Sender encrypted with (myPub, senderPriv), decrypt needs (senderPub, myPriv)
+                  // For sent messages, strip the embedded senderPublicKey (which is MY key, not the contact's)
+                  const encForDecrypt = isMine
+                    ? { ...encryptedData, senderPublicKey: undefined }
+                    : encryptedData;
 
-                  if (msg.sender_username === user?.username) {
-                    // Sent by me -> fallback is recipient's public key (the contact we're chatting with)
-                    fallbackPublicKey = contactPublicKey;
-                  } else {
-                    // Received by me -> fallback is sender's public key (the contact we're chatting with)
-                    fallbackPublicKey = contactPublicKey;
-                  }
-
-                  // decryptMessage handles v2 (embedded key) and v1 (fallback key)
-                  const decrypted = decryptMessage(encryptedData, fallbackPublicKey || '', privateKey);
+                  const decrypted = decryptMessage(encForDecrypt, contactPublicKey || '', privateKey);
                   msg._decryptedContent = decrypted;
                 } catch (e) {
                   console.warn('Failed to decrypt message:', msg.id, e);
@@ -582,23 +608,21 @@ export const useStore = create<AppState>()(
             }
           }
 
-          // 3. Final Pass: Update state with DECRYPTED content
           const finalMessages = [...currentMessages];
 
           for (const msg of messages) {
             const existingIndex = finalMessages.findIndex(m => m.id === msg.id);
             if (existingIndex >= 0) {
-              // Update existing message (now with decrypted content if available)
+
               finalMessages[existingIndex] = { ...finalMessages[existingIndex], ...msg };
             } else {
-              // Should have been added in optimistic step, but double check
+
               if (!existingIds.has(msg.id)) {
                 finalMessages.push(msg);
               }
             }
           }
 
-          // Sort again to be safe
           finalMessages.sort((a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
@@ -622,36 +646,31 @@ export const useStore = create<AppState>()(
           return;
         }
 
-        // Check if recipient is a trusted contact (friend)
         let isFriend = contacts.some(c => c.contact_username === recipientUsername && !c.is_blocked);
-        
-        // If not found in local state, try refreshing contacts from server
-        // This handles cases where friend request was just accepted
+
         if (!isFriend) {
           console.log('🔄 Friend not found in local state, refreshing contacts from server...');
           await get().loadContacts();
-          // Re-check with fresh data
+
           const freshContacts = get().contacts;
           isFriend = freshContacts.some(c => c.contact_username === recipientUsername && !c.is_blocked);
           console.log('🔄 After refresh - isFriend:', isFriend, 'contacts:', freshContacts.map(c => c.contact_username));
         }
-        
+
         if (!isFriend) {
           console.error('❌ Cannot send message: Not friends with', recipientUsername);
           throw new Error('You must be friends with this user to send messages. Send a friend request first.');
         }
 
-        // CRITICAL: Verify our key pair is valid before sending
         const isValidPair = verifyKeyPair(privateKey, publicKey);
         if (!isValidPair) {
           console.warn('⚠️ Invalid key pair detected in sendMessage! Deriving correct public key...');
           publicKey = derivePublicKeyFromPrivate(privateKey);
           console.log('🔧 Using derived publicKey:', publicKey?.substring(0, 30));
-          // Update store with corrected key
+
           set({ publicKey });
         }
 
-        // Always fetch the latest recipient public key from the server
         console.log('📤 Fetching public key from server for:', recipientUsername);
         let recipientPublicKey: string | undefined;
         try {
@@ -667,8 +686,6 @@ export const useStore = create<AppState>()(
           throw new Error('Recipient has not set up encryption');
         }
 
-        // Encrypt message using static key pair (X25519)
-        // v2 protocol: includes sender's public key in the payload for reliable decryption
         console.log('📤 Encrypting with:', {
           recipientPubKey: recipientPublicKey?.substring(0, 30),
           senderPrivKey: privateKey?.substring(0, 30),
@@ -677,24 +694,22 @@ export const useStore = create<AppState>()(
         const encrypted = encryptMessage(content, recipientPublicKey, privateKey, publicKey);
         const encryptedContent = JSON.stringify(encrypted);
 
-        // Build sender's theme for theme sync
         const senderTheme = buildCurrentMessageTheme();
 
-        // Add to local messages optimistically
         const currentMessages = get().messages.get(recipientUsername) || [];
         const optimisticId = -Date.now();
         const optimisticMessage: Message = {
           id: optimisticId,
           sender_id: user.id,
           sender_username: user.username,
-          recipient_id: 0, // Unknown ID for now
+          recipient_id: 0,
           recipient_username: recipientUsername,
           encrypted_content: encryptedContent,
           message_type: messageType,
           status: 'sending',
           expiry_type: 'none',
           created_at: new Date().toISOString(),
-          _decryptedContent: content, // We know what we sent
+          _decryptedContent: content,
           sender_theme: senderTheme,
         };
 
@@ -707,16 +722,15 @@ export const useStore = create<AppState>()(
           const sentMessage = await api.sendMessage(
             recipientUsername,
             encryptedContent,
-            undefined, // encryptedKey
+            undefined,
             'none',
             messageType,
             fileData,
-            senderTheme // Include sender's theme for theme sync
+            senderTheme
           );
 
           console.log('✅ Message sent successfully', sentMessage);
 
-          // Update optimistic message with real one while preserving decrypted content
           sentMessage._decryptedContent = content;
 
           const updatedMessages = new Map(get().messages);
@@ -732,14 +746,12 @@ export const useStore = create<AppState>()(
           updatedMessages.set(recipientUsername, userMessages);
           set({ messages: updatedMessages });
 
-          // Persist message and update/persist conversation snapshot for history
           try {
             await get().persistMessage(sentMessage);
           } catch (e) {
             console.error('❌ Failed to persist sent message:', e);
           }
 
-          // Update conversation preview & persist
           const stateAfterSend = get();
           const existingConvIndex = stateAfterSend.conversations.findIndex(c => c.username === recipientUsername);
           if (existingConvIndex >= 0) {
@@ -762,7 +774,7 @@ export const useStore = create<AppState>()(
 
         } catch (error) {
           console.error('Failed to send message:', error);
-          // Mark as failed
+
           const updatedMessages = new Map(get().messages);
           const userMessages = updatedMessages.get(recipientUsername) || [];
           const index = userMessages.findIndex(m => m.id === optimisticId);
@@ -780,11 +792,17 @@ export const useStore = create<AppState>()(
         if (username) {
           get().loadMessages(username);
 
-          // Clear typing indicator for this user
           const state = get();
           const newTypingUsers = new Map(state.typingUsers);
           newTypingUsers.delete(username);
           set({ typingUsers: newTypingUsers });
+
+          // Mark all messages from this user as "notified" so they
+          // never re-pop a browser Notification on reconnect.
+          const conversationMessages = state.messages.get(username) || [];
+          conversationMessages.forEach(m => {
+            localStorageManager.markMessageNotified(m.id).catch(() => {});
+          });
         }
       },
 
@@ -794,7 +812,6 @@ export const useStore = create<AppState>()(
           const state = get();
           set({ contacts: [...state.contacts, contact] });
 
-          // Also add to conversations immediately
           const existingConv = state.conversations.find(c => c.username === username);
           if (!existingConv) {
             const newConversation: Conversation = {
@@ -828,29 +845,26 @@ export const useStore = create<AppState>()(
         const state = get();
         const senderUsername = message.sender_username;
         const currentConversation = get().currentConversation;
-        
-        // Check if message already exists
+
         const currentMessages = get().messages.get(senderUsername) || [];
         const exists = currentMessages.some(m => m.id === message.id);
 
         if (!exists) {
-          // Decrypt immediately if possible
-          // v2 protocol: senderPublicKey is embedded in the message payload
+
           const { privateKey, contacts } = get();
           if (privateKey && message.encrypted_content) {
             try {
               const encryptedData = JSON.parse(message.encrypted_content) as EncryptedMessage;
 
-              // Get fallback public key - first try contacts, then fetch from server
               let fallbackPublicKey = '';
               const contact = contacts.find(
                 c => c.contact_username === message.sender_username
               );
-              
+
               if (contact?.public_key) {
                 fallbackPublicKey = contact.public_key;
               } else if (!encryptedData.senderPublicKey) {
-                // v1 message needs fallback key - try to fetch from server
+
                 try {
                   const keyData = await api.getPublicKey(message.sender_username);
                   fallbackPublicKey = keyData.public_key || '';
@@ -860,7 +874,6 @@ export const useStore = create<AppState>()(
                 }
               }
 
-              // decryptMessage handles v2 (uses embedded senderPublicKey) and v1 (uses fallback)
               message._decryptedContent = decryptMessage(
                 encryptedData,
                 fallbackPublicKey,
@@ -881,7 +894,6 @@ export const useStore = create<AppState>()(
           newMessages.set(senderUsername, [...currentMessages, message]);
           set({ messages: newMessages });
 
-          // Update conversation list
           const convIndex = state.conversations.findIndex(c => c.username === senderUsername);
           if (convIndex >= 0) {
             const conversations = [...state.conversations];
@@ -896,28 +908,31 @@ export const useStore = create<AppState>()(
             conversations[convIndex] = updatedConv;
             set({ conversations });
 
-            // Persist latest conversation snapshot and message for history
             get().persistMessage(message).catch(err =>
               console.error('❌ Failed to persist incoming message:', err)
             );
             get().persistConversation(updatedConv).catch(err =>
               console.error('❌ Failed to persist conversation for incoming message:', err)
             );
-            
-            // Play notification sound
+
             initAudioContext();
             playMessageSound();
-            
-            // Show browser notification if not in current conversation
-            if (currentConversation !== senderUsername && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification(`New message from ${senderUsername}`, {
-                body: message._decryptedContent || 'New encrypted message',
-                icon: '/favicon.ico',
-                tag: `msg-${message.id}`,
-              });
+
+            if (state.contacts.some(c => c.contact_username === senderUsername) && message.status !== 'read' && state.currentConversation !== senderUsername && 'Notification' in window && Notification.permission === 'granted') {
+              // De-dup: only notify if we haven't already shown a notification for this ID
+              localStorageManager.wasMessageNotified(message.id).then(alreadyNotified => {
+                if (!alreadyNotified) {
+                  new Notification(`New message from ${senderUsername}`, {
+                    body: message._decryptedContent || 'New encrypted message',
+                    icon: '/favicon.ico',
+                    tag: `msg-${message.id}`,
+                  });
+                  localStorageManager.markMessageNotified(message.id).catch(() => {});
+                }
+              }).catch(() => {});
             }
           } else {
-            // Message from user without an existing conversation entry – create a lightweight one
+
             const newConversation = {
               user_id: message.sender_id,
               username: senderUsername,
@@ -938,18 +953,22 @@ export const useStore = create<AppState>()(
             get().persistConversation(newConversation).catch(err =>
               console.error('❌ Failed to persist new conversation for incoming message:', err)
             );
-            
-            // Play notification sound
+
             initAudioContext();
             playMessageSound();
-            
-            // Show browser notification
-            if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification(`New message from ${senderUsername}`, {
-                body: message._decryptedContent || 'New encrypted message',
-                icon: '/favicon.ico',
-                tag: `msg-${message.id}`,
-              });
+
+            if (state.contacts.some(c => c.contact_username === senderUsername) && message.status !== 'read' && state.currentConversation !== senderUsername && 'Notification' in window && Notification.permission === 'granted') {
+              // De-dup: only notify if we haven't already shown a notification for this ID
+              localStorageManager.wasMessageNotified(message.id).then(alreadyNotified => {
+                if (!alreadyNotified) {
+                  new Notification(`New message from ${senderUsername}`, {
+                    body: message._decryptedContent || 'New encrypted message',
+                    icon: '/favicon.ico',
+                    tag: `msg-${message.id}`,
+                  });
+                  localStorageManager.markMessageNotified(message.id).catch(() => {});
+                }
+              }).catch(() => {});
             }
           }
         }
@@ -964,17 +983,101 @@ export const useStore = create<AppState>()(
         }
       },
 
+      loadProfile: async (userId?: number) => {
+        const targetId = userId ?? get().user?.id;
+        if (!targetId) return;
+        try {
+          const profile = await profileApi.getProfile(targetId);
+          set({ profile });
+        } catch (error) {
+          console.error('Failed to load profile', error);
+        }
+      },
+
+      updateProfile: async (data: Partial<Profile>) => {
+        try {
+          const profile = await profileApi.updateProfile(data);
+          set({ profile });
+        } catch (error) {
+          console.error('Failed to update profile', error);
+          throw error;
+        }
+      },
+
+      uploadAvatar: async (file: File) => {
+        try {
+          const res = await profileApi.uploadAvatar(file);
+          const profile = get().profile;
+          set({ profile: { ...(profile || {}), avatar_url: res.avatar_url } as Profile });
+        } catch (error) {
+          console.error('Upload failed:', error);
+          throw error;
+        }
+      },
+
+      updatePrivacy: async (data: Partial<PrivacySettings>) => {
+        try {
+          const privacy = await profileApi.updatePrivacy(data);
+          set({ privacy });
+        } catch (error) {
+          console.error('Failed to update privacy', error);
+          throw error;
+        }
+      },
+
+      loadPrivacy: async () => {
+        try {
+          const privacy = await profileApi.getPrivacy();
+          set({ privacy });
+        } catch (error) {
+          console.error('Failed to load privacy settings', error);
+        }
+      },
+
+      blockUser: async (username: string) => {
+        await profileApi.block(username);
+        set(state => ({
+          contacts: state.contacts.map(c =>
+            c.contact_username === username ? { ...c, is_blocked: true } : c
+          ),
+        }));
+      },
+
+      unblockUser: async (username: string) => {
+        await profileApi.unblock(username);
+        set(state => ({
+          contacts: state.contacts.map(c =>
+            c.contact_username === username ? { ...c, is_blocked: false } : c
+          ),
+        }));
+      },
+
+      removeAvatar: async () => {
+        await profileApi.removeAvatar();
+        const profile = get().profile;
+        if (profile) {
+          set({ profile: { ...profile, avatar_url: undefined, avatar_blur: undefined } });
+        }
+      },
+
+      reportUser: async (username: string, reason: string, description?: string) => {
+        const result = await profileApi.report({
+          reported_username: username,
+          reason: reason as any,
+          description,
+        });
+        return result.report_id;
+      },
+
       loadPendingRequests: async () => {
         try {
           const pending = await friendApi.getPendingRequests();
           console.log('📋 Pending friend requests:', pending);
-          // Could store this in state if needed
+
         } catch (error) {
           console.error('Failed to load pending requests:', error);
         }
       },
-
-      // ============ Presence ============
 
       setUserOnline: (userId: number, isOnline: boolean) => {
         const state = get();
@@ -1000,19 +1103,16 @@ export const useStore = create<AppState>()(
 
       clearError: () => set({ error: null }),
 
-      // ============ Deletion Actions ============
-
       deleteMessageForMe: async (messageId: number, conversationUsername: string) => {
-        // Delete locally only - does not affect the other user
+
         try {
-          // Remove from local state
+
           const currentMessages = new Map(get().messages);
           const convMessages = currentMessages.get(conversationUsername) || [];
           const updatedMessages = convMessages.filter(m => m.id !== messageId);
           currentMessages.set(conversationUsername, updatedMessages);
           set({ messages: currentMessages });
 
-          // Remove from IndexedDB
           await localStorageManager.deleteMessage(messageId);
           console.log('🗑️ Message deleted locally:', messageId);
         } catch (error) {
@@ -1021,9 +1121,9 @@ export const useStore = create<AppState>()(
       },
 
       deleteMessageForEveryone: async (messageId: number, conversationUsername: string) => {
-        // Delete for everyone - sends delete event to recipient
+
         try {
-          // First mark locally as deleted
+
           const currentMessages = new Map(get().messages);
           const convMessages = currentMessages.get(conversationUsername) || [];
           const updatedMessages = convMessages.map(m => {
@@ -1040,13 +1140,10 @@ export const useStore = create<AppState>()(
           currentMessages.set(conversationUsername, updatedMessages);
           set({ messages: currentMessages });
 
-          // Mark as deleted in IndexedDB
           await localStorageManager.markMessageAsDeleted(messageId);
 
-          // Send delete event to recipient via WebSocket
           wsManager.sendDeleteMessage(messageId, conversationUsername);
 
-          // Also try to delete on server
           try {
             await api.deleteMessage(messageId);
           } catch (e) {
@@ -1060,36 +1157,30 @@ export const useStore = create<AppState>()(
       },
 
       clearChat: async (username: string) => {
-        // Clear local chat history only - does not affect the other user
+
         try {
           const { user } = get();
           if (!user) return;
 
-          // Clear from local state
           const currentMessages = new Map(get().messages);
           currentMessages.set(username, []);
           set({ messages: currentMessages });
 
-          // Clear from IndexedDB
           await localStorageManager.clearConversationMessages(username, user.username);
 
-          // Clear calls from local state
           const currentCalls = get().callHistory;
           const filteredCalls = currentCalls.filter(call =>
             call.caller_username !== username && call.receiver_username !== username
           );
           set({ callHistory: filteredCalls });
 
-          // Clear history on server (both messages and calls)
           try {
-            // We treat clearChat as "Delete history for me".
-            // We call the new endpoint to delete call history for this user
+
             await api.deleteCallHistory(username);
           } catch (e) {
             console.warn('Failed to delete call history on server:', e);
           }
 
-          // Update conversation preview
           const conversations = [...get().conversations];
           const convIndex = conversations.findIndex(c => c.username === username);
           if (convIndex >= 0) {
@@ -1109,17 +1200,15 @@ export const useStore = create<AppState>()(
       },
 
       deleteConversationForEveryone: async (username: string) => {
-        // Delete all messages for both sides, but keep the conversation in recents
+
         try {
           const { user } = get();
           if (!user) return;
 
-          // Clear messages from local state (but keep empty array for the conversation)
           const currentMessages = new Map(get().messages);
           currentMessages.set(username, []);
           set({ messages: currentMessages });
 
-          // Update conversation preview (keep in list but clear preview)
           const conversations = [...get().conversations];
           const convIndex = conversations.findIndex(c => c.username === username);
           if (convIndex >= 0) {
@@ -1132,13 +1221,10 @@ export const useStore = create<AppState>()(
             set({ conversations });
           }
 
-          // Clear messages from IndexedDB (but keep conversation entry)
           await localStorageManager.clearConversationMessages(username, user.username);
 
-          // Send delete event to recipient via WebSocket
           wsManager.sendDeleteConversation(username);
 
-          // Also try to delete messages on server
           try {
             await api.deleteConversation(username);
           } catch (e) {
@@ -1152,7 +1238,7 @@ export const useStore = create<AppState>()(
       },
 
       handleRemoteDeleteMessage: (messageId: number, senderUsername: string) => {
-        // Handle incoming delete message event from another user
+
         const currentMessages = new Map(get().messages);
         const convMessages = currentMessages.get(senderUsername) || [];
         const updatedMessages = convMessages.map(m => {
@@ -1169,19 +1255,16 @@ export const useStore = create<AppState>()(
         currentMessages.set(senderUsername, updatedMessages);
         set({ messages: currentMessages });
 
-        // Update IndexedDB
         localStorageManager.markMessageAsDeleted(messageId).catch(console.error);
         console.log('📨 Remote message deletion received:', messageId);
       },
 
       handleRemoteDeleteConversation: (senderUsername: string) => {
-        // Handle incoming delete conversation event from another user
-        // Clear messages but keep the conversation in recents
+
         const currentMessages = new Map(get().messages);
         currentMessages.set(senderUsername, []);
         set({ messages: currentMessages });
 
-        // Update conversation preview (keep in list but show cleared)
         const conversations = [...get().conversations];
         const convIndex = conversations.findIndex(c => c.username === senderUsername);
         if (convIndex >= 0) {
@@ -1194,7 +1277,6 @@ export const useStore = create<AppState>()(
           set({ conversations });
         }
 
-        // Clear messages from IndexedDB (but keep conversation entry)
         const user = get().user;
         if (user) {
           localStorageManager.clearConversationMessages(senderUsername, user.username).catch(console.error);
@@ -1203,13 +1285,10 @@ export const useStore = create<AppState>()(
         console.log('📨 Remote conversation cleared:', senderUsername);
       },
 
-      // ============ Persistent Storage ============
-
       loadPersistedData: async () => {
         try {
           console.log('📂 Loading persisted data from IndexedDB...');
 
-          // Load conversations
           const storedConversations = await localStorageManager.getAllConversations();
           if (storedConversations.length > 0) {
             const conversations = storedConversations.map(conv => ({
@@ -1226,7 +1305,6 @@ export const useStore = create<AppState>()(
             console.log(`📂 Loaded ${conversations.length} conversations from storage`);
           }
 
-          // Load contacts
           const storedContacts = await localStorageManager.getAllContacts();
           if (storedContacts.length > 0) {
             const contacts = storedContacts.map(contact => ({
@@ -1246,8 +1324,7 @@ export const useStore = create<AppState>()(
             console.log(`📂 Loaded ${contacts.length} contacts from storage`);
           }
 
-          // Load messages for all conversations
-          const { user, privateKey, contacts: loadedContacts } = get();
+          const { user, privateKey, contacts: loadedContacts, publicKey } = get();
           if (user) {
             const messagesMap = new Map();
             for (const conv of storedConversations) {
@@ -1273,12 +1350,12 @@ export const useStore = create<AppState>()(
                   read_at: msg.read_at,
                   expiry_type: msg.expiry_type,
                   expires_at: msg.expires_at,
-                  file_metadata: msg.file_metadata
+                  file_metadata: msg.file_metadata,
+                  _decryptedContent: (msg as any).decrypted_content
                 }));
 
-                // Decrypt messages if we have a private key
                 if (privateKey) {
-                  // Get public key from conversation or contacts
+
                   let contactPublicKey = conv.public_key;
                   if (!contactPublicKey) {
                     const contact = loadedContacts.find(c => c.contact_username === conv.username);
@@ -1289,10 +1366,16 @@ export const useStore = create<AppState>()(
                     if (msg.encrypted_content && !msg._decryptedContent) {
                       try {
                         const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
-                        const decrypted = decryptMessage(encryptedData, contactPublicKey || '', privateKey);
+                        const isMine = msg.sender_username === user?.username;
+
+                        // For sent messages, strip embedded senderPublicKey (it's MY key, not contact's)
+                        const encForDecrypt = isMine
+                          ? { ...encryptedData, senderPublicKey: undefined }
+                          : encryptedData;
+                        const decrypted = decryptMessage(encForDecrypt, contactPublicKey || '', privateKey);
                         msg._decryptedContent = decrypted;
                       } catch (e) {
-                        // Silent fail - will be retried during sync
+
                         msg._decryptedContent = null;
                       }
                     }
@@ -1315,17 +1398,14 @@ export const useStore = create<AppState>()(
         try {
           console.log('🔄 Syncing with server...');
 
-          // Load fresh data from server
           await get().loadContacts();
           await get().loadConversations();
 
-          // Get all conversations with messages from server
           const allConversationsData = await api.getAllConversationsWithMessages();
 
-          // Update local storage with server data
-          const { user, contacts, conversations, privateKey } = get();
+          const { user, contacts, conversations, privateKey, publicKey } = get();
           if (user) {
-            // Save conversations to IndexedDB
+
             const storedConversations: StoredConversation[] = conversations.map(conv => ({
               username: conv.username,
               user_id: conv.user_id,
@@ -1338,7 +1418,6 @@ export const useStore = create<AppState>()(
             }));
             await localStorageManager.saveConversations(storedConversations);
 
-            // Save contacts to IndexedDB
             const storedContacts: StoredContact[] = contacts.map(contact => ({
               id: contact.id,
               user_id: contact.user_id,
@@ -1354,8 +1433,41 @@ export const useStore = create<AppState>()(
             }));
             await localStorageManager.saveContacts(storedContacts);
 
-            // Save messages to IndexedDB
+            const messagesMap = new Map();
             for (const [username, messages] of Object.entries(allConversationsData)) {
+
+              if (privateKey) {
+
+                let contactPublicKey: string | undefined;
+                try {
+                  const keyData = await api.getPublicKey(username);
+                  contactPublicKey = keyData.public_key;
+                } catch (e) {
+
+                  const contact = contacts.find(c => c.contact_username === username);
+                  contactPublicKey = contact?.public_key;
+                }
+
+                for (const msg of (messages as Message[])) {
+                  if (msg.encrypted_content && !msg._decryptedContent) {
+                    try {
+                      const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
+                      const isMine = msg.sender_username === user?.username;
+
+                      // For sent messages, strip embedded senderPublicKey (it's MY key, not contact's)
+                      const encForDecrypt = isMine
+                        ? { ...encryptedData, senderPublicKey: undefined }
+                        : encryptedData;
+                      const decrypted = decryptMessage(encForDecrypt, contactPublicKey || '', privateKey);
+                      msg._decryptedContent = decrypted;
+                    } catch (e) {
+                      console.warn('Failed to decrypt message during sync:', msg.id, e);
+                      msg._decryptedContent = '[Decryption Failed]';
+                    }
+                  }
+                }
+              }
+
               const storedMessages: StoredMessage[] = (messages as Message[]).map(msg => ({
                 id: msg.id,
                 sender_id: msg.sender_id,
@@ -1364,6 +1476,7 @@ export const useStore = create<AppState>()(
                 recipient_username: msg.recipient_username,
                 encrypted_content: msg.encrypted_content,
                 encrypted_key: msg.encrypted_key,
+                decrypted_content: msg._decryptedContent ?? undefined,
                 message_type: msg.message_type,
                 status: msg.status,
                 created_at: msg.created_at,
@@ -1374,38 +1487,7 @@ export const useStore = create<AppState>()(
                 file_metadata: msg.file_metadata
               }));
               await localStorageManager.saveMessages(storedMessages);
-            }
 
-            // Update in-memory state WITH decryption
-            const messagesMap = new Map();
-            for (const [username, messages] of Object.entries(allConversationsData)) {
-              // Decrypt messages if we have a private key
-              if (privateKey) {
-                // Fetch public key for this contact
-                let contactPublicKey: string | undefined;
-                try {
-                  const keyData = await api.getPublicKey(username);
-                  contactPublicKey = keyData.public_key;
-                } catch (e) {
-                  // Fallback to contacts array
-                  const contact = contacts.find(c => c.contact_username === username);
-                  contactPublicKey = contact?.public_key;
-                }
-
-                // Decrypt each message
-                for (const msg of (messages as Message[])) {
-                  if (msg.encrypted_content && !msg._decryptedContent) {
-                    try {
-                      const encryptedData = JSON.parse(msg.encrypted_content) as EncryptedMessage;
-                      const decrypted = decryptMessage(encryptedData, contactPublicKey || '', privateKey);
-                      msg._decryptedContent = decrypted;
-                    } catch (e) {
-                      console.warn('Failed to decrypt message during sync:', msg.id, e);
-                      msg._decryptedContent = '[Decryption Failed]';
-                    }
-                  }
-                }
-              }
               messagesMap.set(username, messages);
             }
             set({ messages: messagesMap });
@@ -1467,7 +1549,7 @@ export const useStore = create<AppState>()(
 
           for (const conv of conversations) {
             await get().loadMessages(conv.username);
-            // Small delay to prevent overwhelming the server
+
             await new Promise(resolve => setTimeout(resolve, 100));
           }
 
@@ -1480,32 +1562,37 @@ export const useStore = create<AppState>()(
     {
       name: 'zerotrace-store',
       partialize: (state) => ({
-        // Only persist non-sensitive data
+
         currentConversation: state.currentConversation,
       }),
     }
   )
 );
 
-// Setup WebSocket message handlers
 function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppState>) => void) {
-  // Track processed message IDs to prevent duplicates from WebSocket replay
+
   const processedMessageIds = new Set<string | number>();
 
-  // Handle incoming messages
+  const emitToast = (detail: any) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zerotrace-toast', { detail }));
+      if ('vibrate' in navigator) navigator.vibrate(5);
+    }
+  };
+
+  const processedNotificationIds = new Set<number>();
+
   wsManager.on('message', (data) => {
     console.log('📨 Received message via WebSocket:', data);
 
     const messageId = data.message_id;
 
-    // Deduplication: Skip if we've already processed this message
     if (processedMessageIds.has(messageId)) {
       console.log(`⏩ Skipping duplicate message ${messageId}`);
       return;
     }
     processedMessageIds.add(messageId);
 
-    // Limit the size of the processed IDs set to prevent memory leaks
     if (processedMessageIds.size > 1000) {
       const firstItem = processedMessageIds.values().next().value;
       if (firstItem !== undefined) {
@@ -1516,7 +1603,6 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     const state = get();
     const senderUsername = data.sender_username;
 
-    // Create message object
     const message: Message = {
       id: messageId,
       sender_id: data.sender_id,
@@ -1526,7 +1612,7 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
       encrypted_content: data.content || data.encrypted_content,
       encrypted_key: data.encrypted_key,
       message_type: data.message_type || 'text',
-      status: 'delivered',
+      status: data.status || 'delivered',
       expiry_type: data.expiry_type || 'none',
       sender_theme: data.sender_theme,
       created_at: data.timestamp || new Date().toISOString(),
@@ -1534,15 +1620,12 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
 
     get().addIncomingMessage(message);
 
-    // Send delivery receipt
     wsManager.sendDeliveryReceipt(messageId, data.sender_id);
   });
 
-  // Handle typing indicators
   wsManager.on('typing', (data) => {
     get().setUserTyping(data.sender_username, data.is_typing);
 
-    // Auto-clear typing after 3 seconds
     if (data.is_typing) {
       setTimeout(() => {
         get().setUserTyping(data.sender_username, false);
@@ -1550,39 +1633,125 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     }
   });
 
-  // Handle presence updates
   wsManager.on('presence', (data) => {
     get().setUserOnline(data.user_id, data.is_online);
   });
 
-  // Handle message sent confirmations
   wsManager.on('message_sent', (data) => {
     console.log('✅ Message sent confirmation:', data);
   });
 
-  // Handle read receipts
   wsManager.on('read_receipt', (data) => {
     console.log('👁️ Read receipt:', data);
-    // Could update message status in UI here
+
   });
 
-  // Handle delivery receipts
   wsManager.on('delivery_receipt', (data) => {
     console.log('📬 Delivery receipt:', data);
-    // Could update message status in UI here
+
   });
 
-  // Handle connection confirmation
   wsManager.on('connected', (data) => {
     console.log('✅ WebSocket connected:', data);
   });
 
-  // Handle errors
   wsManager.on('error', (data) => {
     console.error('❌ WebSocket error:', data);
   });
 
-  // Handle remote message deletion
+  wsManager.on('notification', (data) => {
+    const notificationId = data.notification_id;
+    if (notificationId && processedNotificationIds.has(notificationId)) {
+      return;
+    }
+    if (notificationId) {
+      processedNotificationIds.add(notificationId);
+      if (processedNotificationIds.size > 500) {
+        const first = processedNotificationIds.values().next().value;
+        if (first !== undefined) processedNotificationIds.delete(first);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('zerotrace-notification', { detail: data }));
+
+    switch (data.notification_type) {
+      case 'friend_request':
+        get().loadPendingRequests?.();
+        window.dispatchEvent(new CustomEvent('friend_request', { detail: data }));
+        emitToast({
+          type: 'friend_request',
+          title: 'New friend request',
+          message: data.title || data.message,
+          username: data.related_username || data.username,
+          priority: 'medium',
+        });
+        break;
+      case 'friend_request_accepted':
+        get().loadContacts();
+        get().loadConversations();
+        window.dispatchEvent(new CustomEvent('friend_accepted', { detail: data }));
+        emitToast({
+          type: 'friend_request_accepted',
+          title: 'Request accepted',
+          message: data.title || data.message,
+          username: data.related_username || data.username,
+          priority: 'low',
+        });
+        break;
+      case 'friend_request_rejected':
+        get().loadPendingRequests?.();
+        emitToast({
+          type: 'friend_request_rejected',
+          title: 'Request rejected',
+          message: data.title || data.message,
+          username: data.related_username || data.username,
+          priority: 'low',
+        });
+        break;
+      case 'contact_removed':
+        get().loadContacts();
+        window.dispatchEvent(new CustomEvent('contact_removed', { detail: data }));
+        emitToast({
+          type: 'contact_removed',
+          title: 'Contact removed',
+          message: data.title || data.message || 'You were removed',
+          username: data.related_username || data.username,
+          priority: 'medium',
+        });
+        break;
+      case 'user_blocked':
+        window.dispatchEvent(new CustomEvent('blocked', { detail: data }));
+        emitToast({
+          type: 'user_blocked',
+          title: 'You were blocked',
+          message: 'Messaging is disabled',
+          priority: 'medium',
+        });
+        break;
+      case 'user_unblocked':
+        get().loadContacts();
+        emitToast({
+          type: 'user_unblocked',
+          title: 'Unblocked',
+          message: 'You can message again',
+          priority: 'low',
+        });
+        break;
+      case 'key_changed':
+        get().loadContacts();
+        emitToast({
+          type: 'key_changed',
+          title: 'Security alert',
+          message: 'A contact changed their key',
+          priority: 'high',
+          sticky: true,
+        });
+        break;
+      default:
+        break;
+    }
+  });
+
   wsManager.on('delete_message_received', (data) => {
     console.log('🗑️ Remote delete message received:', data);
     const messageId = data.message_id || data.data?.message_id;
@@ -1592,7 +1761,6 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     }
   });
 
-  // Handle remote conversation deletion
   wsManager.on('delete_conversation_received', (data) => {
     console.log('🗑️ Remote delete conversation received:', data);
     const senderUsername = data.sender_username || data.data?.sender_username;
@@ -1601,37 +1769,67 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     }
   });
 
-  // Handle incoming friend request
   wsManager.on('friend_request', (data) => {
     console.log('📨 New friend request received:', data);
-    // Refresh pending requests to show the new request
+
     get().loadPendingRequests?.();
+    const username = data.sender_username || data.data?.sender_username || 'Someone';
+    emitToast({
+      type: 'friend_request',
+      title: 'New friend request',
+      message: `${username} wants to connect`,
+      username,
+      priority: 'medium',
+    });
   });
 
-  // Handle friend request accepted
   wsManager.on('friend_request_accepted', (data) => {
     console.log('✅ Friend request accepted:', data);
     const accepterUsername = data.accepter_username || data.data?.accepter_username;
-    
-    // Show notification
+
     console.log(`🎉 ${accepterUsername} accepted your friend request!`);
-    
-    // Refresh contacts to show the new contact in sidebar
+    if (accepterUsername) {
+      emitToast({
+        type: 'friend_request_accepted',
+        title: 'You are now friends',
+        message: `${accepterUsername} accepted your request`,
+        username: accepterUsername,
+        priority: 'low',
+      });
+    }
+
     get().loadContacts();
-    
-    // Also refresh conversations
+
     get().loadConversations();
   });
 
-  // Handle friend request rejected
   wsManager.on('friend_request_rejected', (data) => {
     console.log('❌ Friend request rejected:', data);
-    // Refresh pending requests
+
     get().loadPendingRequests?.();
+    const username = data.username || data.data?.username;
+    if (username) {
+      emitToast({
+        type: 'friend_request_rejected',
+        title: 'Request declined',
+        message: `${username} declined your friend request`,
+        username,
+        priority: 'low',
+      });
+    }
+  });
+
+  // Handle contacts_sync message from server (triggered after friend request accept, block, unblock, etc.)
+  wsManager.on('contacts_sync', (data) => {
+    console.log('🔄 Contacts sync received from server:', data);
+    // Refresh contacts and conversations
+    get().loadContacts();
+    get().loadConversations();
+    // Dispatch custom event for UI components that listen to it (like Sidebar)
+    window.dispatchEvent(new CustomEvent('contacts_sync', { detail: data }));
   });
 }
 
-// Extend Message type to include decrypted content for local display
 declare module './api' {
   interface Message {
     _decryptedContent?: string | null;

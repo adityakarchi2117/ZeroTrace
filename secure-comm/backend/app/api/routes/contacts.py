@@ -222,7 +222,7 @@ async def get_conversations(
     db: Session = Depends(get_db)
 ):
     """Get conversation previews with unread counts"""
-    from app.db.database import Message, MessageStatusEnum
+    from app.db.database import Message, MessageStatusEnum, UserProfile
     from sqlalchemy import or_, and_, func, desc
     
     # Get all unique conversation partners
@@ -255,11 +255,28 @@ async def get_conversations(
     for p in partners_received.all():
         all_partner_ids.add(p.partner_id)
     
+    # Filter out removed contacts so they don't appear in sidebar
+    from app.db.friend_models import TrustedContact
+    removed_contact_ids = set()
+    removed_contacts = db.query(TrustedContact.contact_user_id).filter(
+        TrustedContact.user_id == user_id,
+        TrustedContact.is_removed == True
+    ).all()
+    for rc in removed_contacts:
+        removed_contact_ids.add(rc.contact_user_id)
+    
+    all_partner_ids -= removed_contact_ids
+    
     conversations = []
     for partner_id in all_partner_ids:
         partner = db.query(User).filter(User.id == partner_id).first()
         if not partner:
             continue
+        
+        # Get profile for display_name and avatar_url
+        profile = db.query(UserProfile).filter(UserProfile.user_id == partner_id).first()
+        display_name = profile.display_name if profile and profile.display_name else None
+        avatar_url = profile.avatar_url if profile and profile.avatar_url else None
         
         # Get last message
         last_message = db.query(Message).filter(
@@ -279,6 +296,8 @@ async def get_conversations(
         conversations.append({
             "user_id": partner.id,
             "username": partner.username,
+            "display_name": display_name,
+            "avatar_url": avatar_url,
             "public_key": partner.public_key,
             "identity_key": partner.identity_key,
             "last_message_time": last_message.created_at.isoformat() if last_message else None,

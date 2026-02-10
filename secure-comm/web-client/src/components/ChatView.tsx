@@ -18,12 +18,13 @@ import { EncryptionLock } from '@/lib/motion';
 import { CallView } from './CallView';
 import { SmartCallOverlay } from './SmartCallOverlay';
 import QRCodeDisplay from './QRCodeDisplay';
+import ContactProfilePopup from './ContactProfilePopup';
 import {
   Lock, Send, Smile, Paperclip, Phone, Video,
   MoreVertical, Shield, Check, CheckCheck, Clock,
   ArrowLeft, Info, X, PhoneOff, Mic, MicOff,
   VideoOff, Image, File, Loader2, Download, FileText,
-  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff, QrCode
+  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff, QrCode, RefreshCw
 } from 'lucide-react';
 import { format } from 'date-fns';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
@@ -39,7 +40,6 @@ function toLocalTime(utcDateString: string): Date {
   return new Date(utcDateString);
 }
 
-// Animated message bubble component
 function AnimatedMessageBubble({
   children,
   isSent,
@@ -120,7 +120,7 @@ export default function ChatView() {
   const [showInfo, setShowInfo] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  // Use the new WebRTC hook
+
   const {
     callState,
     isMuted,
@@ -143,10 +143,11 @@ export default function ChatView() {
   const [showCallChat, setShowCallChat] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showProfilePopup, setShowProfilePopup] = useState(false);
+  const [contactProfile, setContactProfile] = useState<any>(null);
   const [contactPublicKey, setContactPublicKey] = useState<string | null>(null);
   const [newMessageIds, setNewMessageIds] = useState<Set<number>>(new Set());
-  
-  // Cache for decrypted message content to avoid re-decrypting on every render
+
   const decryptedCacheRef = useRef<Map<number, string>>(new Map());
 
   const [contextMenu, setContextMenu] = useState<{
@@ -159,6 +160,7 @@ export default function ChatView() {
 
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
+  const [isRefreshingKeys, setIsRefreshingKeys] = useState(false);
 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     visible: boolean;
@@ -205,7 +207,6 @@ export default function ChatView() {
     loadCallHistory();
   }, [loadCallHistory]);
 
-  // Clear decryption cache when conversation changes
   useEffect(() => {
     decryptedCacheRef.current.clear();
   }, [currentConversation]);
@@ -221,15 +222,13 @@ export default function ChatView() {
         } catch (error) {
           console.error('Failed to fetch public key:', error);
         }
-      } else if (partnerKey) {
-        setContactPublicKey(partnerKey);
+      } else {
+        setContactPublicKey(partnerKey ?? null);
       }
     }
     fetchPublicKey();
   }, [currentConversation, partnerKey]);
 
-  // Refresh contacts when conversation changes and contact is not found
-  // This handles cases where friend request was just accepted
   useEffect(() => {
     if (currentConversation && !contact) {
       console.log('🔄 Contact not found for conversation, refreshing contacts...');
@@ -237,7 +236,6 @@ export default function ChatView() {
     }
   }, [currentConversation, contact, loadContacts]);
 
-  // Close chat menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (showChatMenu) {
@@ -265,11 +263,10 @@ export default function ChatView() {
     }
   }, [newMessage, currentConversation]);
 
-  // Show call errors
   useEffect(() => {
     if (callError) {
       console.error('Call error:', callError);
-      // Could show a toast here
+
       clearError();
     }
   }, [callError, clearError]);
@@ -317,7 +314,7 @@ export default function ChatView() {
     setIsSending(true);
     setSendError(null);
     try {
-      // Track this as a new message for animation
+
       const tempId = Date.now();
       setNewMessageIds(prev => new Set(prev).add(tempId));
 
@@ -326,7 +323,6 @@ export default function ChatView() {
       setNewMessage('');
       inputRef.current?.focus();
 
-      // Clear the new message indicator after animation
       setTimeout(() => {
         setNewMessageIds(prev => {
           const next = new Set(prev);
@@ -426,12 +422,11 @@ export default function ChatView() {
   };
 
   const decryptContent = useCallback((msg: any): string => {
-    // Check in-memory cache first
+
     if (decryptedCacheRef.current.has(msg.id)) {
       return decryptedCacheRef.current.get(msg.id)!;
     }
-    
-    // Check message object cache (set by store during load)
+
     if (msg._decryptedContent) {
       decryptedCacheRef.current.set(msg.id, msg._decryptedContent);
       return msg._decryptedContent;
@@ -441,44 +436,63 @@ export default function ChatView() {
 
     try {
       const encrypted = JSON.parse(msg.encrypted_content) as EncryptedMessage;
-      
-      // For v2 messages, the sender's public key is embedded
-      // For v1 messages, we need the fallback key from the contact
-      let fallbackPublicKey: string | undefined;
-      
-      // Try all available sources for the public key
-      fallbackPublicKey = contactPublicKey || contact?.public_key || conversation?.public_key;
-      
+      const isMine = msg.sender_username === user?.username;
+
+      // The contact's public key is always needed:
+      // - For SENT messages: I encrypted with (recipientPub, myPriv), so decrypt needs (recipientPub, myPriv)
+      // - For RECEIVED messages: Sender encrypted with (myPub, senderPriv), so decrypt needs (senderPub, myPriv)
+      // In both cases, the correct public key is the CONTACT's public key.
+      const contactKey = contactPublicKey || contact?.public_key || conversation?.public_key;
+
       let decrypted: string | null = null;
-      
-      // v2 messages have embedded sender key, so fallback is less critical
-      if (encrypted.senderPublicKey) {
-        // v2: Use embedded key, fallback is just a safety net
-        decrypted = decryptMessage(encrypted, fallbackPublicKey || '', privateKey);
-      } else {
-        // v1: Must have fallback key
-        if (!fallbackPublicKey) {
-          const fallback = msg.sender_username === user?.username ? '[Sent message]' : '[Key not available]';
+
+      if (isMine) {
+        // I sent this message — the embedded senderPublicKey is MY key, which is wrong for decryption.
+        // I need the RECIPIENT's (contact's) public key to recreate the correct ECDH shared secret.
+        if (!contactKey) {
+          const fallback = '[Sent message]';
           decryptedCacheRef.current.set(msg.id, fallback);
           return fallback;
         }
-        decrypted = decryptMessage(encrypted, fallbackPublicKey, privateKey);
+        decrypted = decryptMessage(
+          { ...encrypted, senderPublicKey: undefined },
+          contactKey,
+          privateKey
+        );
+      } else if (encrypted.senderPublicKey) {
+        // I received this message — the embedded senderPublicKey is the SENDER's key, which is correct.
+        decrypted = decryptMessage(encrypted, contactKey || '', privateKey);
+      } else {
+        // v1 legacy message (no embedded key)
+        if (!contactKey) {
+          const fallback = '[Key not available]';
+          decryptedCacheRef.current.set(msg.id, fallback);
+          return fallback;
+        }
+        decrypted = decryptMessage(encrypted, contactKey, privateKey);
       }
 
       if (decrypted) {
-        // Cache the successful decryption
+
         decryptedCacheRef.current.set(msg.id, decrypted);
-        // Also update the message object for persistence
+
         msg._decryptedContent = decrypted;
         return decrypted;
       }
 
-      // Decryption failed
-      const fallback = msg.sender_username === user?.username ? '[Sent message]' : '[Decryption failed]';
+      // Decryption returned null - likely key mismatch
+      const fallback = isMine ? '[Sent message]' : '[Cannot decrypt - keys may have changed]';
       decryptedCacheRef.current.set(msg.id, fallback);
       return fallback;
     } catch (err) {
-      console.error('Decryption error:', err);
+      // Only log decryption errors in development, not repeatedly
+      if (process.env.NODE_ENV === 'development') {
+        const loggedErrorsKey = `decryption_error_logged_${msg.id}`;
+        if (!(window as any)[loggedErrorsKey]) {
+          console.warn(`Decryption failed for message ${msg.id}:`, err);
+          (window as any)[loggedErrorsKey] = true;
+        }
+      }
       const errorMsg = '[Encrypted message]';
       decryptedCacheRef.current.set(msg.id, errorMsg);
       return errorMsg;
@@ -624,7 +638,6 @@ export default function ChatView() {
     setShowChatMenu(false);
   };
 
-  // Block user handler
   const handleBlockUser = () => {
     setContactActionDialog({
       visible: true,
@@ -634,7 +647,6 @@ export default function ChatView() {
     setShowChatMenu(false);
   };
 
-  // Unblock user handler
   const handleUnblockUser = () => {
     setContactActionDialog({
       visible: true,
@@ -644,7 +656,6 @@ export default function ChatView() {
     setShowChatMenu(false);
   };
 
-  // Remove contact handler
   const handleRemoveContact = () => {
     setContactActionDialog({
       visible: true,
@@ -654,7 +665,28 @@ export default function ChatView() {
     setShowChatMenu(false);
   };
 
-  // Confirm contact action (block/unblock/remove)
+  const handleRefreshKeys = async () => {
+    if (!currentConversation) return;
+    setIsRefreshingKeys(true);
+    setShowChatMenu(false);
+    try {
+      // Refetch the public key from the server
+      const keyData = await api.getPublicKey(currentConversation);
+      if (keyData?.public_key) {
+        setContactPublicKey(keyData.public_key);
+        // Clear the decryption cache to force re-attempt
+        decryptedCacheRef.current.clear();
+        // Reload messages to get fresh decryption
+        await loadContacts();
+        console.log('✅ Keys refreshed successfully for', currentConversation);
+      }
+    } catch (error) {
+      console.error('Failed to refresh keys:', error);
+    } finally {
+      setIsRefreshingKeys(false);
+    }
+  };
+
   const confirmContactAction = async () => {
     if (!contactActionDialog || !partnerId) return;
 
@@ -663,18 +695,24 @@ export default function ChatView() {
     try {
       if (contactActionDialog.type === 'block') {
         await friendApi.blockUser(partnerId, 'other');
-        console.log('✅ User blocked successfully');
+        console.log('User blocked successfully');
       } else if (contactActionDialog.type === 'unblock') {
         await friendApi.unblockUser(partnerId);
-        console.log('✅ User unblocked successfully');
+        console.log('User unblocked successfully');
       } else if (contactActionDialog.type === 'remove') {
         await friendApi.removeContact(partnerId);
-        console.log('✅ Contact removed successfully');
+        console.log('Contact removed successfully');
+        // Remove conversation from sidebar immediately
+        const { conversations } = useStore.getState();
+        const filtered = conversations.filter(c => c.username !== currentConversation);
+        useStore.setState({ conversations: filtered });
         setCurrentConversation(null);
+        // Dispatch event so Sidebar can also refresh
+        window.dispatchEvent(new CustomEvent('contact_removed', { detail: { username: currentConversation } }));
       }
 
-      // Refresh contacts list
       await loadContacts();
+      await loadConversations();
     } catch (error) {
       console.error(`Failed to ${contactActionDialog.type} user:`, error);
     }
@@ -706,7 +744,6 @@ export default function ChatView() {
 
   if (!currentConversation) return null;
 
-  // Show call error if call failed
   if (callState && callState.status === 'failed') {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
@@ -735,7 +772,6 @@ export default function ChatView() {
     );
   }
 
-  // Show call rejected UI
   if (callState && callState.status === 'rejected') {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
@@ -764,7 +800,6 @@ export default function ChatView() {
     );
   }
 
-  // Render fullscreen call UI
   if (callState && ['calling', 'ringing', 'connecting', 'connected'].includes(callState.status)) {
     return (
       <CallView
@@ -790,7 +825,6 @@ export default function ChatView() {
 
   return (
     <div className="flex-1 flex flex-col h-full">
-      {/* Chat Header */}
       <motion.div
         className="h-16 px-4 border-b border-gray-800 flex items-center justify-between bg-cipher-dark/50"
         initial={{ y: -20, opacity: 0 }}
@@ -809,14 +843,24 @@ export default function ChatView() {
 
           <div className="relative">
             <motion.div
-              className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer"
-              style={{ background: accentGradient }}
+              className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer overflow-hidden"
+              style={!conversation?.avatar_url ? { background: accentGradient } : undefined}
               whileHover={{ scale: 1.1, rotate: 5 }}
               whileTap={{ scale: 0.95 }}
+              onClick={() => setShowProfilePopup(true)}
+              title={`View ${currentConversation}'s profile`}
             >
-              <span className="text-white font-medium">
-                {currentConversation.charAt(0).toUpperCase()}
-              </span>
+              {conversation?.avatar_url ? (
+                <img
+                  src={conversation.avatar_url.startsWith('http') ? conversation.avatar_url : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${conversation.avatar_url}`}
+                  alt={conversation.display_name || currentConversation}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-white font-medium">
+                  {currentConversation.charAt(0).toUpperCase()}
+                </span>
+              )}
             </motion.div>
             {isOnline && (
               <motion.div
@@ -828,7 +872,7 @@ export default function ChatView() {
           </div>
 
           <div>
-            <h2 className="font-medium text-white">{currentConversation}</h2>
+            <h2 className="font-medium text-white">{conversation?.display_name || currentConversation}</h2>
             <div className="flex items-center gap-2 text-xs">
               {isTyping ? (
                 <span className="text-cipher-primary">typing...</span>
@@ -837,7 +881,7 @@ export default function ChatView() {
               ) : (
                 <span className="text-gray-500">Offline</span>
               )}
-              <span className="text-gray-600">•</span>
+              <span className="text-gray-600">&bull;</span>
               <div className="flex items-center gap-1 text-gray-500">
                 <EncryptionLock size="sm" isEncrypting={false} />
                 <span>Encrypted</span>
@@ -905,10 +949,8 @@ export default function ChatView() {
                   <Trash2 className="w-4 h-4" />
                   <span>Delete for everyone</span>
                 </button>
-                
+
                 <div className="border-t border-gray-700 my-1" />
-                
-                {/* Show My QR Code */}
                 <button
                   onClick={() => {
                     setShowQRCode(true);
@@ -919,10 +961,16 @@ export default function ChatView() {
                   <QrCode className="w-4 h-4" />
                   <span>Show my QR code</span>
                 </button>
-                
+                <button
+                  onClick={handleRefreshKeys}
+                  disabled={isRefreshingKeys}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshingKeys ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingKeys ? 'Refreshing...' : 'Refresh keys'}</span>
+                </button>
+
                 <div className="border-t border-gray-700 my-1" />
-                
-                {/* Block/Unblock option */}
                 {isBlocked ? (
                   <button
                     onClick={handleUnblockUser}
@@ -940,8 +988,6 @@ export default function ChatView() {
                     <span>Block user</span>
                   </button>
                 )}
-                
-                {/* Remove contact option */}
                 {contact && (
                   <button
                     onClick={handleRemoveContact}
@@ -956,8 +1002,6 @@ export default function ChatView() {
           </div>
         </div>
       </motion.div>
-
-      {/* Security Banner */}
       <motion.div
         className="px-4 py-2 bg-cipher-primary/10 border-b border-cipher-primary/20 flex items-center justify-center gap-2 text-xs text-cipher-primary"
         initial={{ opacity: 0 }}
@@ -967,8 +1011,6 @@ export default function ChatView() {
         <EncryptionLock size="sm" isEncrypting={false} />
         <span>Messages are end-to-end encrypted. No one outside this chat can read them.</span>
       </motion.div>
-
-      {/* Messages */}
       <div className={`flex-1 overflow-y-auto p-4 ${densityClasses.messageGap}`}>
         {historyItems.length === 0 ? (
           <motion.div
@@ -1163,8 +1205,6 @@ export default function ChatView() {
         )}
         <div ref={messagesEndRef} />
       </div >
-
-      {/* Send Error Display */}
       {sendError && (
         <motion.div
           className="mx-4 mb-2 p-3 bg-red-900/50 border border-red-500/50 rounded-lg text-red-200 text-sm flex items-center justify-between"
@@ -1177,13 +1217,11 @@ export default function ChatView() {
             onClick={() => setSendError(null)}
             className="ml-2 text-red-400 hover:text-red-200"
           >
-            ×
+            &times;
           </button>
         </motion.div>
       )}
-
-      {/* Message Input */}
-      < motion.div
+      <motion.div
         className="p-4 border-t border-gray-800 bg-cipher-dark/50"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -1199,198 +1237,215 @@ export default function ChatView() {
             </div>
           </div>
         ) : (
-        <div className="flex items-end gap-3">
-          <div className="relative">
-            <motion.button
-              onClick={() => setShowAttachMenu(!showAttachMenu)}
-              className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white"
-              whileHover={{ scale: 1.1, rotate: -10 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Paperclip className="w-5 h-5" />
-            </motion.button>
-
-            <AnimatePresence>
-              {showAttachMenu && (
-                <motion.div
-                  className="absolute bottom-12 left-0 bg-cipher-dark border border-gray-700 rounded-lg shadow-lg p-2 min-w-[150px]"
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                >
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-700 rounded text-gray-300 text-sm"
-                  >
-                    <Image className="w-4 h-4" />
-                    <span>Photo</span>
-                  </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-700 rounded text-gray-300 text-sm"
-                  >
-                    <File className="w-4 h-4" />
-                    <span>Document</span>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept="image/*,video/*,.pdf,.doc,.docx,.txt"
-              onChange={handleFileSelect}
-            />
-          </div>
-
-          <div className="flex-1 relative">
-            <textarea
-              ref={inputRef}
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Type a message..."
-              rows={1}
-              className="w-full bg-cipher-darker border border-gray-700 rounded-2xl py-3 px-4 pr-12 text-white placeholder-gray-500 focus:border-cipher-primary resize-none transition-colors"
-              style={{ maxHeight: '120px' }}
-            />
-            <motion.button
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-cipher-primary transition-colors"
-              whileHover={{ scale: 1.2 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Smile className="w-5 h-5" />
-            </motion.button>
-
-            <AnimatePresence>
-              {showEmojiPicker && (
-                <motion.div
-                  className="absolute right-0 bottom-14 z-50"
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                >
-                  <EmojiPicker
-                    onEmojiClick={(emojiData: EmojiClickData) => {
-                      setNewMessage(prev => prev + emojiData.emoji);
-                      setShowEmojiPicker(false);
-                      inputRef.current?.focus();
-                    }}
-                    theme={Theme.DARK}
-                    width={350}
-                    height={400}
-                    searchPlaceholder="Search emoji..."
-                    previewConfig={{ showPreview: false }}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <motion.button
-            onClick={handleSend}
-            disabled={!newMessage.trim() || isSending}
-            className={`
-              p-3 rounded-full transition-all
-              ${newMessage.trim()
-                ? 'text-white hover:opacity-90'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'}
-            `}
-            style={newMessage.trim() ? { background: accentGradient } : undefined}
-            whileHover={newMessage.trim() ? { scale: 1.1 } : {}}
-            whileTap={newMessage.trim() ? { scale: 0.9 } : {}}
-          >
-            {isSending ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
-          </motion.button>
-        </div>
-        )}
-      </motion.div >
-
-      {/* Info Panel */}
-      <AnimatePresence>
-        {
-          showInfo && (
-            <motion.div
-              className="absolute right-0 top-0 h-full w-80 bg-cipher-dark/95 backdrop-blur-xl border-l border-gray-800 p-4 overflow-y-auto z-20"
-              initial={{ x: '100%', opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: '100%', opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-medium text-white">Contact Info</h3>
-                <motion.button
-                  onClick={() => setShowInfo(false)}
-                  className="p-1 hover:bg-gray-700 rounded"
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <X className="w-5 h-5 text-gray-400" />
-                </motion.button>
-              </div>
-
-              <motion.div
-                className="text-center mb-6"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.1 }}
+          <div className="flex items-end gap-3">
+            <div className="relative">
+              <motion.button
+                onClick={() => setShowAttachMenu(!showAttachMenu)}
+                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white"
+                whileHover={{ scale: 1.1, rotate: -10 }}
+                whileTap={{ scale: 0.9 }}
               >
-                <motion.div
-                  className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-3"
-                  style={{ background: accentGradient }}
-                  whileHover={{ scale: 1.05, rotate: 5 }}
-                >
-                  <span className="text-2xl text-white font-medium">
-                    {currentConversation.charAt(0).toUpperCase()}
-                  </span>
-                </motion.div>
-                <h4 className="text-lg font-medium text-white">{currentConversation}</h4>
-                <p className="text-sm text-gray-500">{contact?.contact_email || 'Secured Peer'}</p>
+                <Paperclip className="w-5 h-5" />
+              </motion.button>
+
+              <AnimatePresence>
+                {showAttachMenu && (
+                  <motion.div
+                    className="absolute bottom-12 left-0 bg-cipher-dark border border-gray-700 rounded-lg shadow-lg p-2 min-w-[150px]"
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  >
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-700 rounded text-gray-300 text-sm"
+                    >
+                      <Image className="w-4 h-4" />
+                      <span>Photo</span>
+                    </button>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-700 rounded text-gray-300 text-sm"
+                    >
+                      <File className="w-4 h-4" />
+                      <span>Document</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept="image/*,application/pdf,.doc,.docx,.txt,.zip"
+                onChange={handleFileSelect}
+              />
+            </div>
+
+            <div className="flex-1 relative">
+              <textarea
+                ref={inputRef}
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder="Type a message..."
+                className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 pr-12 resize-none focus:outline-none focus:ring-1 focus:ring-cipher-primary max-h-32 min-h-[42px]"
+                rows={1}
+              />
+              <motion.button
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                className={`absolute inset-y-0 right-2 my-auto h-8 w-8 flex items-center justify-center rounded transition-colors z-10 ${showEmojiPicker ? 'bg-gray-600 text-white' : 'hover:bg-gray-700 text-gray-400'}`}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <Smile className="w-5 h-5" />
+              </motion.button>
+              <AnimatePresence>
+                {showEmojiPicker && (
+                  <>
+                    {/* Click-outside backdrop to close picker */}
+                    <motion.div
+                      className="fixed inset-0 z-40"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      onClick={() => setShowEmojiPicker(false)}
+                    />
+                    <motion.div
+                      className="absolute bottom-12 right-0 z-50"
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    >
+                      <EmojiPicker
+                        theme={Theme.DARK}
+                        onEmojiClick={(emojiData: EmojiClickData) => {
+                          setNewMessage(prev => prev + emojiData.emoji);
+                          inputRef.current?.focus();
+                        }}
+                        width={350}
+                        height={400}
+                      />
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <motion.button
+              onClick={handleSend}
+              disabled={!newMessage.trim() || isSending}
+              className="p-2.5 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: accentGradient }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {isSending ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
+            </motion.button>
+          </div>
+        )}
+      </motion.div>
+
+      <AnimatePresence>
+        {showInfo && (
+          <motion.div
+            className="absolute right-0 top-0 h-full w-80 bg-cipher-dark/95 backdrop-blur-xl border-l border-gray-800 p-4 overflow-y-auto z-20"
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-medium text-white">Contact Info</h3>
+              <motion.button
+                onClick={() => setShowInfo(false)}
+                className="p-1 hover:bg-gray-700 rounded"
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </motion.button>
+            </div>
+
+            <motion.div
+              className="text-center mb-6"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+            >
+              <motion.div
+                className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-3 cursor-pointer"
+                style={{ background: accentGradient }}
+                whileHover={{ scale: 1.05, rotate: 5 }}
+                onClick={() => { setShowInfo(false); setShowProfilePopup(true); }}
+                title="View full profile"
+              >
+                <span className="text-2xl text-white font-medium">
+                  {currentConversation.charAt(0).toUpperCase()}
+                </span>
+              </motion.div>
+              <h4 className="text-lg font-medium text-white">{currentConversation}</h4>
+              <p className="text-sm text-gray-500">{contact?.contact_email || 'Secured Peer'}</p>
+              {isOnline ? (
+                <span className="inline-flex items-center gap-1 mt-1 text-xs text-green-400">
+                  <span className="w-2 h-2 rounded-full bg-green-500" /> Online
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 mt-1 text-xs text-gray-500">
+                  <span className="w-2 h-2 rounded-full bg-gray-600" /> Offline
+                </span>
+              )}
+            </motion.div>
+            <motion.button
+              onClick={() => { setShowInfo(false); setShowProfilePopup(true); }}
+              className="w-full mb-4 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90 transition-colors"
+              style={{ background: accentGradient }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              View Full Profile
+            </motion.button>
+
+            <div className="space-y-4">
+              <motion.div
+                className="p-3 bg-cipher-darker rounded-lg"
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2 }}
+              >
+                <p className="text-xs text-gray-500 mb-1">Public Key Fingerprint</p>
+                <p className="text-xs font-mono text-gray-400 break-all">
+                  {(contact?.public_key || contactPublicKey)
+                    ? generateFingerprint(contact?.public_key || contactPublicKey || '')
+                    : 'Not available - user has not set up encryption'}
+                </p>
               </motion.div>
 
-              <div className="space-y-4">
-                <motion.div
-                  className="p-3 bg-cipher-darker rounded-lg"
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <p className="text-xs text-gray-500 mb-1">Public Key Fingerprint</p>
-                  <p className="text-xs font-mono text-gray-400 break-all">
-                    {(contact?.public_key || contactPublicKey)
-                      ? generateFingerprint(contact?.public_key || contactPublicKey || '')
-                      : 'Not available - user has not set up encryption'}
-                  </p>
-                </motion.div>
-
-                <motion.div
-                  className="p-3 bg-cipher-darker rounded-lg"
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  <div className="flex items-center gap-2 text-cipher-primary">
-                    <Shield className="w-4 h-4" />
-                    <span className="text-sm font-medium">Encryption Active</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    All messages are encrypted with X25519 + AES-256-GCM
-                  </p>
-                </motion.div>
-              </div>
-            </motion.div>
-          )
+              <motion.div
+                className="p-3 bg-cipher-darker rounded-lg"
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.3 }}
+              >
+                <div className="flex items-center gap-2 text-cipher-primary">
+                  <Shield className="w-4 h-4" />
+                  <span className="text-sm font-medium">Encryption Active</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  All messages are encrypted with X25519 + AES-256-GCM
+                </p>
+              </motion.div>
+            </div>
+          </motion.div>
+        )
         }
       </AnimatePresence >
-
-      {/* Incoming call overlay with animations */}
       <AnimatePresence>
         {
           callState && callState.status === 'ringing' && callState.isIncoming && (
@@ -1407,7 +1462,6 @@ export default function ChatView() {
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 200, damping: 15 }}
                 >
-                  {/* Pulse rings */}
                   <motion.div
                     className="absolute inset-0 rounded-full border-2 border-cipher-primary/30"
                     animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
@@ -1480,8 +1534,6 @@ export default function ChatView() {
           )
         }
       </AnimatePresence >
-
-      {/* Image Preview Modal */}
       <AnimatePresence>
         {
           previewImage && (
@@ -1531,8 +1583,6 @@ export default function ChatView() {
           )
         }
       </AnimatePresence >
-
-      {/* Message Context Menu */}
       <AnimatePresence>
         {
           contextMenu && (
@@ -1575,8 +1625,6 @@ export default function ChatView() {
           )
         }
       </AnimatePresence >
-
-      {/* Delete Confirmation Dialog */}
       <AnimatePresence>
         {
           deleteConfirmation && (
@@ -1637,8 +1685,6 @@ export default function ChatView() {
           )
         }
       </AnimatePresence >
-
-      {/* Contact Action Confirmation Dialog (Block/Unblock/Remove) */}
       <AnimatePresence>
         {
           contactActionDialog && contactActionDialog.visible && (
@@ -1655,13 +1701,12 @@ export default function ChatView() {
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
               >
                 <div className="flex items-center gap-3 mb-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                    contactActionDialog.type === 'block' 
-                      ? 'bg-orange-500/20' 
-                      : contactActionDialog.type === 'unblock'
-                        ? 'bg-green-500/20'
-                        : 'bg-red-500/20'
-                  }`}>
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${contactActionDialog.type === 'block'
+                    ? 'bg-orange-500/20'
+                    : contactActionDialog.type === 'unblock'
+                      ? 'bg-green-500/20'
+                      : 'bg-red-500/20'
+                    }`}>
                     {contactActionDialog.type === 'block' && <UserX className="w-6 h-6 text-orange-400" />}
                     {contactActionDialog.type === 'unblock' && <ShieldOff className="w-6 h-6 text-green-400" />}
                     {contactActionDialog.type === 'remove' && <UserMinus className="w-6 h-6 text-red-400" />}
@@ -1694,13 +1739,12 @@ export default function ChatView() {
                   <motion.button
                     onClick={confirmContactAction}
                     disabled={contactActionDialog.loading}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
-                      contactActionDialog.type === 'block'
-                        ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                        : contactActionDialog.type === 'unblock'
-                          ? 'bg-green-500 hover:bg-green-600 text-white'
-                          : 'bg-red-500 hover:bg-red-600 text-white'
-                    } disabled:opacity-50`}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${contactActionDialog.type === 'block'
+                      ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                      : contactActionDialog.type === 'unblock'
+                        ? 'bg-green-500 hover:bg-green-600 text-white'
+                        : 'bg-red-500 hover:bg-red-600 text-white'
+                      } disabled:opacity-50`}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                   >
@@ -1717,8 +1761,6 @@ export default function ChatView() {
           )
         }
       </AnimatePresence>
-
-      {/* Smart Minimize Overlay - Shows when tab switched/app minimized */}
       <SmartCallOverlay
         isInCall={!!callState && ['calling', 'ringing', 'connecting', 'connected'].includes(callState.status)}
         callDuration={callDuration}
@@ -1730,15 +1772,21 @@ export default function ChatView() {
         onToggleVideo={handleToggleVideo}
         onEndCall={handleEndCall}
         onRestore={() => {
-          // Scroll to top to show call UI
+
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
-
-      {/* QR Code Display Modal */}
       <QRCodeDisplay
         isOpen={showQRCode}
         onClose={() => setShowQRCode(false)}
+      />
+      <ContactProfilePopup
+        isOpen={showProfilePopup}
+        onClose={() => setShowProfilePopup(false)}
+        username={currentConversation}
+        userId={partnerId}
+        isOnline={isOnline}
+        publicKey={partnerKey}
       />
     </div>
   );

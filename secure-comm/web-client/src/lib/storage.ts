@@ -24,6 +24,8 @@ export interface StoredMessage {
 export interface StoredConversation {
   username: string;
   user_id: number;
+  display_name?: string;
+  avatar_url?: string;
   public_key?: string;
   identity_key?: string;
   last_message_time?: string;
@@ -46,10 +48,18 @@ export interface StoredContact {
   added_at: string;
 }
 
+/** A message ID that has already been notified to the user */
+export interface NotifiedMessageRecord {
+  /** message ID (primary key) */
+  id: number;
+  /** when the notification was shown */
+  notifiedAt: string;
+}
+
 class LocalStorageManager {
   private db: IDBDatabase | null = null;
   private dbName = 'ZeroTraceDB';
-  private version = 1;
+  private version = 2; // bumped for secure profile stores
 
   async init(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -89,7 +99,136 @@ class LocalStorageManager {
         if (!db.objectStoreNames.contains('sync_metadata')) {
           db.createObjectStore('sync_metadata', { keyPath: 'key' });
         }
+
+        // ==================== v2 stores ====================
+
+        // Notified messages — tracks which message IDs already triggered
+        // a browser Notification so they won't fire again on reconnect.
+        if (!db.objectStoreNames.contains('notified_messages')) {
+          db.createObjectStore('notified_messages', { keyPath: 'id' });
+        }
+
+        // Encrypted profile cache — local mirror of the server blob
+        if (!db.objectStoreNames.contains('encrypted_profiles')) {
+          const profileStore = db.createObjectStore('encrypted_profiles', { keyPath: 'username' });
+          profileStore.createIndex('profile_version', 'profile_version', { unique: false });
+        }
+
+        // Read-receipt tracking — message IDs the current user has read
+        if (!db.objectStoreNames.contains('read_messages')) {
+          db.createObjectStore('read_messages', { keyPath: 'id' });
+        }
       };
+    });
+  }
+
+  // ============ Notified Messages (for notification de-dup) ============
+
+  /**
+   * Mark a message ID as already-notified so we never re-pop a
+   * browser Notification for it (even after WebSocket reconnect).
+   */
+  async markMessageNotified(messageId: number): Promise<void> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['notified_messages'], 'readwrite');
+      const store = tx.objectStore('notified_messages');
+      const req = store.put({ id: messageId, notifiedAt: new Date().toISOString() });
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
+   * Check whether a message has already been notified.
+   */
+  async wasMessageNotified(messageId: number): Promise<boolean> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['notified_messages'], 'readonly');
+      const store = tx.objectStore('notified_messages');
+      const req = store.get(messageId);
+      req.onsuccess = () => resolve(!!req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
+   * Batch-check multiple message IDs.
+   */
+  async getNotifiedMessageIds(messageIds: number[]): Promise<Set<number>> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['notified_messages'], 'readonly');
+      const store = tx.objectStore('notified_messages');
+      const notified = new Set<number>();
+      let pending = messageIds.length;
+      if (pending === 0) { resolve(notified); return; }
+
+      messageIds.forEach(id => {
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result) notified.add(id);
+          if (--pending === 0) resolve(notified);
+        };
+        req.onerror = () => {
+          if (--pending === 0) resolve(notified);
+        };
+      });
+    });
+  }
+
+  // ============ Read Messages (for notification de-dup) ============
+
+  async markMessageRead(messageId: number): Promise<void> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['read_messages'], 'readwrite');
+      const store = tx.objectStore('read_messages');
+      const req = store.put({ id: messageId, readAt: new Date().toISOString() });
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async wasMessageRead(messageId: number): Promise<boolean> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['read_messages'], 'readonly');
+      const store = tx.objectStore('read_messages');
+      const req = store.get(messageId);
+      req.onsuccess = () => resolve(!!req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ============ Encrypted Profile Cache ============
+
+  async cacheEncryptedProfile(username: string, data: {
+    encrypted_data: string;
+    profile_nonce: string;
+    dek_version: number;
+    profile_version: number;
+    content_hash: string;
+  }): Promise<void> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['encrypted_profiles'], 'readwrite');
+      const store = tx.objectStore('encrypted_profiles');
+      const req = store.put({ username, ...data, cachedAt: new Date().toISOString() });
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async getCachedProfile(username: string): Promise<any | null> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['encrypted_profiles'], 'readonly');
+      const store = tx.objectStore('encrypted_profiles');
+      const req = store.get(username);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
     });
   }
 
@@ -326,7 +465,7 @@ class LocalStorageManager {
   async clearAllData(): Promise<void> {
     if (!this.db) await this.init();
 
-    const stores = ['messages', 'conversations', 'contacts', 'sync_metadata'];
+    const stores = ['messages', 'conversations', 'contacts', 'sync_metadata', 'notified_messages', 'encrypted_profiles', 'read_messages'];
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(stores, 'readwrite');

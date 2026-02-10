@@ -17,6 +17,8 @@ export interface User {
   last_seen?: string;
   created_at: string;
   settings?: any;
+  display_name?: string;
+  avatar_url?: string;
 }
 
 export interface Message {
@@ -63,6 +65,8 @@ export interface Contact {
 export interface Conversation {
   user_id: number;
   username: string;
+  display_name?: string;
+  avatar_url?: string;
   public_key?: string;
   identity_key?: string;
   last_message_time?: string;
@@ -93,6 +97,11 @@ export interface LoginResponse {
 class ApiClient {
   private client: AxiosInstance;
   private token: string | null = null;
+
+  /** Expose the raw axios instance for sub-modules (profileApi, etc.) */
+  get http(): AxiosInstance {
+    return this.client;
+  }
 
   constructor() {
     this.client = axios.create({
@@ -159,6 +168,63 @@ class ApiClient {
 
   async updateSettings(settings: any): Promise<User> {
     const response = await this.client.patch('/api/auth/me/settings', { settings });
+    return response.data;
+  }
+
+  // ============ Account Management ============
+
+  async getAccountStatus(): Promise<{
+    username: string;
+    email: string;
+    is_disabled: boolean;
+    deleted_at: string | null;
+    created_at: string | null;
+    can_change_username: boolean;
+    days_until_username_change: number;
+    last_username_change: string | null;
+    previous_usernames: Array<{ username: string; changed_at: string }>;
+  }> {
+    const response = await this.client.get('/api/auth/me/account-status');
+    return response.data;
+  }
+
+  async changeUsername(newUsername: string, password: string): Promise<{
+    success: boolean;
+    message: string;
+    new_username: string;
+    next_change_available: string;
+  }> {
+    const response = await this.client.post('/api/auth/me/change-username', {
+      new_username: newUsername,
+      password: password,
+    });
+    return response.data;
+  }
+
+  async disableAccount(password: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post('/api/auth/me/disable', { password });
+    this.token = null;
+    return response.data;
+  }
+
+  async deleteAccount(password: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.delete('/api/auth/me', { data: { password } });
+    this.token = null;
+    return response.data;
+  }
+
+  async reactivateAccount(username: string, password: string): Promise<LoginResponse> {
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+
+    const response = await this.client.post('/api/auth/reactivate', formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    this.token = response.data.access_token;
     return response.data;
   }
 

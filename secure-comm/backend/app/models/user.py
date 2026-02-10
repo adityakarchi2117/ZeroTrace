@@ -30,6 +30,8 @@ class UserResponse(UserBase):
     is_verified: bool = False
     last_seen: Optional[datetime] = None
     settings: Optional[dict] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 

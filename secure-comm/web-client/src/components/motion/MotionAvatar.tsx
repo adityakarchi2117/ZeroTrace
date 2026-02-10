@@ -6,6 +6,8 @@ import { useAppearance } from '@/lib/useAppearance';
 
 interface MotionAvatarProps {
   name: string;
+  src?: string | null;
+  alt?: string;
   isOnline?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
@@ -21,6 +23,8 @@ const sizeClasses = {
 
 export function MotionAvatar({
   name,
+  src,
+  alt,
   isOnline = false,
   size = 'md',
   className = '',
@@ -33,12 +37,20 @@ export function MotionAvatar({
     <div
       className={`
         ${sizeClasses[size]}
-        rounded-full flex items-center justify-center font-medium text-white
+        rounded-full flex items-center justify-center font-medium text-white overflow-hidden
         ${className}
       `}
-      style={{ background: accentGradient }}
+      style={{ background: !src ? accentGradient : undefined }}
     >
-      {name.charAt(0).toUpperCase()}
+      {src ? (
+        <img
+          src={src}
+          alt={alt || name}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        name.charAt(0).toUpperCase()
+      )}
     </div>
   );
 
@@ -54,10 +66,10 @@ export function MotionAvatar({
   }
 
   return (
-    <TiltAvatar 
-      maxTilt={20} 
-      scale={1.05} 
-      glare 
+    <TiltAvatar
+      maxTilt={20}
+      scale={1.05}
+      glare
       shadow
       className="relative"
     >

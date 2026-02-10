@@ -9,7 +9,8 @@ export interface WebSocketMessage {
   'call_offer' | 'call_answer' | 'call_reject' | 'call_rejected' |
   'call_end' | 'call_ended' | 'call_failed' | 'ice_candidate' |
   'presence_subscribe' | 'get_online_status' | 'online_status' |
-  'delete_message' | 'delete_message_received' | 'delete_conversation' | 'delete_conversation_received';
+  'delete_message' | 'delete_message_received' | 'delete_conversation' | 'delete_conversation_received' |
+  'contacts_sync' | 'notification' | 'friend_request' | 'friend_request_accepted' | 'friend_request_rejected';
   data?: any;
   timestamp: string;
   [key: string]: any;
@@ -253,6 +254,11 @@ class WebSocketManager {
   }
 
   updatePresence(isOnline: boolean) {
+    // Only send presence if socket is actually connected
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      console.log(`⏳ Skipping presence update (socket state: ${this.ws?.readyState ?? 'undefined'})`);
+      return;
+    }
     this.send({
       type: 'presence',
       data: {

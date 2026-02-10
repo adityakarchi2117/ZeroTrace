@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '@/lib/store';
 import { useAppearance } from '@/lib/useAppearance';
-import { motion, AnimatePresence } from 'framer-motion';
 import { MotionAvatar } from '@/components/motion';
-import { 
-  Lock, Search, Plus, Settings, LogOut, MessageSquare, 
+import {
+  Lock, Search, Plus, Settings, LogOut, MessageSquare,
   Shield, User as UserIcon, Loader2, UserPlus, X, Users,
-  ShieldBan, RefreshCw, Bell, Volume2, VolumeX
+  ShieldBan, RefreshCw, Volume2, VolumeX, Bell
 } from 'lucide-react';
 import { getSoundEnabled, setSoundEnabled, loadSoundSettings } from '@/lib/sound';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -22,6 +21,7 @@ interface SidebarProps {
   onAddFriend: () => void;
   onPendingRequests: () => void;
   onBlockedUsers?: () => void;
+  onProfile?: () => void;
 }
 
 interface SearchResult {
@@ -49,28 +49,42 @@ const ConversationItem = React.memo(({
   formatTime: (date: string) => string;
   onClick: () => void;
 }) => {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const avatarUrl = conv.avatar_url
+    ? (conv.avatar_url.startsWith('http') ? conv.avatar_url : `${API_BASE}${conv.avatar_url}`)
+    : null;
+  const displayName = conv.display_name || conv.username;
+
   return (
     <button
       onClick={onClick}
       className={`
         w-full rounded-lg flex items-center transition-all duration-200
-        ${collapsed 
-          ? `justify-center p-2 ${isActive ? 'bg-cipher-primary/30' : 'hover:bg-gray-800'}` 
-          : `p-3 gap-3 ${isActive 
-            ? 'bg-cipher-primary/20 border border-cipher-primary/30' 
+        ${collapsed
+          ? `justify-center p-2 ${isActive ? 'bg-cipher-primary/30' : 'hover:bg-gray-800'}`
+          : `p-3 gap-3 ${isActive
+            ? 'bg-cipher-primary/20 border border-cipher-primary/30'
             : 'hover:bg-gray-800'}`}
       `}
-      title={collapsed ? conv.username : undefined}
+      title={collapsed ? displayName : undefined}
     >
       <div className="relative flex-shrink-0">
-        <div 
-          className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full flex items-center justify-center transition-colors ${!isActive ? 'bg-gray-700' : ''}`}
-          style={isActive ? { background: accentGradient } : undefined}
-        >
-          <span className={`text-white font-medium ${collapsed ? 'text-sm' : ''}`}>
-            {conv.username.charAt(0).toUpperCase()}
-          </span>
-        </div>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={displayName}
+            className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full object-cover`}
+          />
+        ) : (
+          <div
+            className={`${collapsed ? 'w-10 h-10' : 'w-12 h-12'} rounded-full flex items-center justify-center transition-colors ${!isActive ? 'bg-gray-700' : ''}`}
+            style={isActive ? { background: accentGradient } : undefined}
+          >
+            <span className={`text-white font-medium ${collapsed ? 'text-sm' : ''}`}>
+              {conv.username.charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
         {isOnline && (
           <div className={`absolute -bottom-0.5 -right-0.5 bg-green-500 rounded-full border-2 border-cipher-dark online-indicator ${collapsed ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
         )}
@@ -80,12 +94,12 @@ const ConversationItem = React.memo(({
           </span>
         )}
       </div>
-      
+
       {!collapsed && (
         <div className="flex-1 min-w-0 text-left">
           <div className="flex items-center justify-between">
             <span className={`font-medium truncate ${isActive ? 'text-white' : 'text-gray-200'}`}>
-              {conv.username}
+              {displayName}
             </span>
             <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
               {formatTime(conv.last_message_time)}
@@ -112,21 +126,23 @@ const ConversationItem = React.memo(({
 
 ConversationItem.displayName = 'ConversationItem';
 
-export default function Sidebar({ 
+export default function Sidebar({
   collapsed = false,
   onToggleCollapse,
-  onNewChat, 
-  onSettings, 
-  onAddFriend, 
+  onNewChat,
+  onSettings,
+  onAddFriend,
   onPendingRequests,
-  onBlockedUsers 
+  onBlockedUsers,
+  onProfile,
 }: SidebarProps) {
-  const { 
-    user, conversations, currentConversation, 
+  const {
+    user, conversations, currentConversation,
     setCurrentConversation, logout, onlineUsers,
-    searchUsers, addContact, loadContacts, loadConversations, contacts
+    searchUsers, addContact, loadContacts, loadConversations, contacts,
+    loadStoredAuth
   } = useStore();
-  
+
   // Sound enabled state
   const [soundEnabled, setSoundEnabledState] = useState(() => {
     loadSoundSettings();
@@ -142,10 +158,11 @@ export default function Sidebar({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [addingUser, setAddingUser] = useState<number | null>(null);
-  
+
   // Badge state
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [isRefreshingContacts, setIsRefreshingContacts] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch pending request count
   const fetchPendingRequestCount = useCallback(async () => {
@@ -186,12 +203,19 @@ export default function Sidebar({
       refreshContacts();
     };
 
+    const handleProfileUpdated = () => {
+      console.log('Profile updated event received');
+      loadConversations(); // Reload conversations to get updated avatars/names
+      loadStoredAuth(); // Reload user to get updated avatar
+    };
+
     // Listen for custom events dispatched from WebSocket handler
     window.addEventListener('contacts_sync', handleContactsSync);
     window.addEventListener('friend_request', handleFriendRequest);
     window.addEventListener('friend_accepted', handleFriendRequest);
     window.addEventListener('contact_removed', handleContactRemoved);
     window.addEventListener('blocked', handleContactRemoved);
+    window.addEventListener('profile_updated', handleProfileUpdated);
 
     return () => {
       window.removeEventListener('contacts_sync', handleContactsSync);
@@ -199,13 +223,15 @@ export default function Sidebar({
       window.removeEventListener('friend_accepted', handleFriendRequest);
       window.removeEventListener('contact_removed', handleContactRemoved);
       window.removeEventListener('blocked', handleContactRemoved);
+      window.removeEventListener('profile_updated', handleProfileUpdated);
     };
-  }, [refreshContacts, fetchPendingRequestCount]);
+  }, [refreshContacts, fetchPendingRequestCount, loadConversations, loadStoredAuth]);
+
 
   // Initial fetch of pending requests
   useEffect(() => {
     fetchPendingRequestCount();
-    
+
     // Poll for counts every 30 seconds
     const interval = setInterval(() => {
       fetchPendingRequestCount();
@@ -217,7 +243,7 @@ export default function Sidebar({
   const filteredConversations = useMemo(() => {
     if (!searchQuery.trim()) return conversations;
     const query = searchQuery.toLowerCase();
-    return conversations.filter(conv => 
+    return conversations.filter(conv =>
       conv.username.toLowerCase().includes(query)
     );
   }, [conversations, searchQuery]);
@@ -226,7 +252,7 @@ export default function Sidebar({
   const isUserOnline = useCallback((userId: number) => {
     return onlineUsers.has(userId);
   }, [onlineUsers]);
-  
+
   // Toggle sound
   const toggleSound = useCallback(() => {
     const newValue = !soundEnabled;
@@ -234,26 +260,29 @@ export default function Sidebar({
     setSoundEnabledState(newValue);
   }, [soundEnabled]);
 
-  // Search for users globally when typing
-  const handleSearchChange = async (value: string) => {
+  // Search for users globally when typing (debounced)
+  const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    
+
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+
     if (value.trim().length >= 2) {
-      setIsSearching(true);
       setShowGlobalSearch(true);
-      try {
-        const results = await searchUsers(value.trim());
-        // Filter out current user and already existing conversations
-        const filtered = results.filter(r => 
-          r.username !== user?.username
-        );
-        setSearchResults(filtered);
-      } catch (error) {
-        console.error('Search failed:', error);
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-      }
+      searchTimerRef.current = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+          const results = await searchUsers(value.trim());
+          const filtered = results.filter(r =>
+            r.username !== user?.username
+          );
+          setSearchResults(filtered);
+        } catch (error) {
+          console.error('Search failed:', error);
+          setSearchResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 300);
     } else {
       setSearchResults([]);
       setShowGlobalSearch(false);
@@ -266,7 +295,7 @@ export default function Sidebar({
     try {
       // Check if conversation already exists
       const existingConv = conversations.find(c => c.username === searchUser.username);
-      
+
       if (existingConv) {
         setCurrentConversation(searchUser.username);
       } else {
@@ -279,7 +308,7 @@ export default function Sidebar({
         await loadConversations();
         setCurrentConversation(searchUser.username);
       }
-      
+
       // Clear search
       setSearchQuery('');
       setSearchResults([]);
@@ -311,13 +340,13 @@ export default function Sidebar({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div 
+      <div
         className={`p-4 border-b border-gray-800 ${collapsed ? 'p-2' : ''}`}
       >
         {/* Header Row */}
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} mb-3`}>
           <div className="flex items-center gap-2">
-            <div 
+            <div
               className="w-8 h-8 rounded-lg flex items-center justify-center"
               style={{ background: accentGradient }}
             >
@@ -367,7 +396,7 @@ export default function Sidebar({
             <UserPlus className="w-4 h-4" />
             {!collapsed && <span className="text-[10px]">Add</span>}
           </button>
-          
+
           <button
             onClick={onPendingRequests}
             className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative`}
@@ -385,7 +414,7 @@ export default function Sidebar({
             </div>
             {!collapsed && <span className="text-[10px]">Requests</span>}
           </button>
-          
+
           {!collapsed && onBlockedUsers && (
             <button
               onClick={onBlockedUsers}
@@ -396,7 +425,7 @@ export default function Sidebar({
               <span className="text-[10px]">Blocked</span>
             </button>
           )}
-          
+
           <button
             onClick={onNewChat}
             className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors`}
@@ -405,7 +434,7 @@ export default function Sidebar({
             <Plus className="w-4 h-4" />
             {!collapsed && <span className="text-[10px]">New</span>}
           </button>
-          
+
           {!collapsed && (
             <button
               onClick={refreshContacts}
@@ -420,21 +449,38 @@ export default function Sidebar({
         </div>
 
         {/* User Info */}
+
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg`}>
-          <MotionAvatar name={user?.username || 'U'} size={collapsed ? 'sm' : 'md'} disableTilt />
+          <MotionAvatar
+            name={user?.display_name || user?.username || 'U'}
+            src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${user.avatar_url}`) : undefined}
+            size={collapsed ? 'sm' : 'md'}
+            disableTilt
+          />
           {!collapsed && (
             <>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-white truncate">{user?.username}</p>
                 <p className="text-xs text-gray-500 truncate">{user?.email}</p>
               </div>
-              <button
-                onClick={logout}
-                className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              <div className="flex gap-1">
+                {onProfile && (
+                  <button
+                    onClick={onProfile}
+                    className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors"
+                    title="Profile"
+                  >
+                    <UserIcon className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={logout}
+                  className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
+                  title="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -465,35 +511,26 @@ export default function Sidebar({
             )}
           </div>
 
-        {/* Global Search Results */}
-        <AnimatePresence>
+          {/* Global Search Results */}
           {showGlobalSearch && searchResults.length > 0 && (
-            <motion.div 
-              className="mt-2 bg-cipher-darker border border-gray-700 rounded-lg overflow-hidden"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-            >
+            <div className="mt-2 bg-cipher-darker border border-gray-700 rounded-lg overflow-hidden animate-fade-in">
               <div className="px-3 py-2 border-b border-gray-700 bg-gray-800/50">
                 <p className="text-xs text-gray-400 font-medium">Users Found</p>
               </div>
               <div className="max-h-48 overflow-y-auto">
-                {searchResults.map((result, index) => {
+                {searchResults.map((result) => {
                   const existingConv = conversations.find(c => c.username === result.username);
                   const isAdding = addingUser === result.id;
-                  
+
                   return (
-                    <motion.button
+                    <button
                       key={result.id}
                       onClick={() => handleStartChat(result)}
                       disabled={isAdding}
                       className="w-full p-3 flex items-center gap-3 hover:bg-gray-800 transition-colors border-b border-gray-700/50 last:border-0"
-                      initial={{ x: -20, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      transition={{ delay: index * 0.05 }}
                     >
                       <div className="relative">
-                        <div 
+                        <div
                           className="w-10 h-10 rounded-full flex items-center justify-center"
                           style={{ background: accentGradient }}
                         >
@@ -518,33 +555,25 @@ export default function Sidebar({
                       ) : (
                         <UserPlus className="w-5 h-5 text-green-500" />
                       )}
-                    </motion.button>
+                    </button>
                   );
                 })}
               </div>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
 
           {/* No results message */}
-          <AnimatePresence>
-            {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
-              <motion.div 
-                className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
+          {showGlobalSearch && !isSearching && searchQuery.length >= 2 && searchResults.length === 0 && (
+            <div className="mt-2 p-4 bg-cipher-darker border border-gray-700 rounded-lg text-center animate-fade-in">
+              <p className="text-sm text-gray-400">No users found for &quot;{searchQuery}&quot;</p>
+              <button
+                onClick={onNewChat}
+                className="mt-2 text-xs text-cipher-primary hover:underline"
               >
-                <p className="text-sm text-gray-400">No users found for &quot;{searchQuery}&quot;</p>
-                <button
-                  onClick={onNewChat}
-                  className="mt-2 text-xs text-cipher-primary hover:underline"
-                >
-                  Try advanced search
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                Try advanced search
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -571,7 +600,7 @@ export default function Sidebar({
           <div className={`space-y-1 ${collapsed ? 'p-1' : 'p-2'}`}>
             {filteredConversations.map((conv) => (
               <ConversationItem
-                key={conv.user_id}
+                key={conv.username || `user-${conv.user_id}`}
                 conv={conv}
                 isActive={currentConversation === conv.username}
                 isOnline={isUserOnline(conv.user_id)}

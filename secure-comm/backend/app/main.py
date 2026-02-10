@@ -11,12 +11,13 @@ Features:
 - Multi-device support
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import asyncio
+import os
 import logging
 from datetime import datetime
 
@@ -24,11 +25,25 @@ from app.api.routes import auth, keys, messages
 from app.api.routes.vault import router as vault_router
 from app.api.routes.contacts import router as contacts_router
 from app.api.routes.friends import router as friends_router
+from app.api.routes.profile import router as profile_router
+from app.api.routes.verification import router as verification_router
+from app.api.routes.secure_profile import router as secure_profile_router
+from app.api.routes.device_sync import router as device_sync_router
 from app.api.websocket import router as websocket_router
 from app.core.config import settings
 from app.db.database import engine, Base
 # Import friend models to ensure they're registered with SQLAlchemy
 from app.db.friend_models import FriendRequest, TrustedContact, BlockedUser, FriendRequestRateLimit
+# Import secure profile models to ensure they're registered with SQLAlchemy
+from app.db.secure_profile_models import (
+    DataEncryptionKey, EncryptedProfile, EncryptedProfilePicture,
+    EncryptedMessageMetadata, EncryptedBackup, KeyRotationLog
+)
+# Import device sync models to ensure they're registered with SQLAlchemy
+from app.db.device_sync_models import (
+    DevicePairingSession, DeviceWrappedDEK, DeviceAuthorization,
+    EncryptedSessionKey, DeviceRevocationLog
+)
 
 # Configure logging
 logging.basicConfig(
@@ -84,6 +99,41 @@ async def rotate_signed_prekeys():
             db.close()
         except Exception as e:
             logger.error(f"❌ Error in key rotation check: {e}")
+        
+        # Run daily
+        await asyncio.sleep(86400)
+
+# Background task for account cleanup
+async def cleanup_deleted_accounts():
+    """Permanently delete accounts marked for deletion over 30 days ago"""
+    from app.db.database import SessionLocal, User
+    from datetime import timedelta
+    
+    while True:
+        db = None
+        try:
+            db = SessionLocal()
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            
+            # Find users to delete
+            to_delete = db.query(User).filter(
+                User.deleted_at != None,
+                User.deleted_at < cutoff
+            ).all()
+            
+            if to_delete:
+                count = len(to_delete)
+                for user in to_delete:
+                    # Cascade delete should handle related records
+                    db.delete(user)
+                
+                db.commit()
+                logger.info(f"🗑️ Permanently deleted {count} accounts (30-day grace period expired)")
+        except Exception as e:
+            logger.error(f"❌ Error in account cleanup: {e}")
+        finally:
+            if db is not None:
+                db.close()
         
         # Run daily
         await asyncio.sleep(86400)
@@ -155,6 +205,7 @@ async def lifespan(app: FastAPI):
     # Start background tasks
     cleanup_task = asyncio.create_task(cleanup_expired_messages())
     rotation_task = asyncio.create_task(rotate_signed_prekeys())
+    account_cleanup_task = asyncio.create_task(cleanup_deleted_accounts())
     logger.info("⚙️  Background tasks started")
     
     yield
@@ -163,6 +214,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down ZeroTrace API...")
     cleanup_task.cancel()
     rotation_task.cancel()
+    account_cleanup_task.cancel()
     logger.info("✅ Shutdown complete")
 
 
@@ -293,7 +345,38 @@ app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
 app.include_router(contacts_router, prefix="/api/contacts", tags=["Contacts"])
 app.include_router(friends_router, prefix="/api/friend", tags=["Friend Requests"])
 app.include_router(vault_router, prefix="/api/vault", tags=["Secure Vault"])
+app.include_router(profile_router, prefix="/api", tags=["Profile & Privacy"])
+app.include_router(verification_router, prefix="/api", tags=["Verification"])
+app.include_router(secure_profile_router, prefix="/api/secure", tags=["Secure Profile & Key Management"])
+app.include_router(device_sync_router, prefix="/api/device", tags=["Multi-Device Sync"])
 app.include_router(websocket_router, prefix="/ws", tags=["WebSocket"])
+
+# Uploads directory (served via authenticated route below)
+_upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+os.makedirs(_upload_dir, exist_ok=True)
+
+
+@app.get("/uploads/{path:path}", tags=["Uploads"])
+async def serve_upload(path: str):
+    """Serve uploaded files with path-traversal protection."""
+    # Resolve and validate the path stays within upload_dir
+    requested = os.path.abspath(os.path.join(_upload_dir, path))
+    if not requested.startswith(os.path.abspath(_upload_dir)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not os.path.isfile(requested):
+        raise HTTPException(status_code=404, detail="File not found")
+    import mimetypes
+    content_type = mimetypes.guess_type(requested)[0] or "application/octet-stream"
+    return FileResponse(
+        requested,
+        media_type=content_type,
+        headers={
+            "Content-Security-Policy": "default-src 'none'",
+            "Content-Disposition": f'inline; filename="{os.path.basename(requested)}"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
 
 
 @app.get("/", tags=["Status"])
