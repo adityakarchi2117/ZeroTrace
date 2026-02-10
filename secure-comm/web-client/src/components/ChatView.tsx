@@ -105,7 +105,7 @@ export default function ChatView() {
   const {
     user, currentConversation, messages, contacts, conversations,
     privateKey, sendMessage, onlineUsers, typingUsers,
-    setCurrentConversation, loadCallHistory, callHistory, loadContacts,
+    setCurrentConversation, loadCallHistory, callHistory, loadContacts, loadConversations,
     deleteMessageForMe, deleteMessageForEveryone, clearChat, deleteConversationForEveryone
   } = useStore();
 
