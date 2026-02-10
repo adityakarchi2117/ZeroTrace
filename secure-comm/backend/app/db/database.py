@@ -4,15 +4,21 @@ from datetime import datetime
 import enum
 from app.core.config import settings
 
+# Fix DATABASE_URL for Render (postgres:// -> postgresql://)
+database_url = settings.DATABASE_URL
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
 # Configure engine based on database type
 if settings.is_postgres:
-    # PostgreSQL configuration with SSL for production
+    # PostgreSQL configuration with SSL for production (Render, etc.)
     connect_args = {}
     if settings.ENVIRONMENT == "production":
-        connect_args["sslmode"] = "require"
+        # Use SSL for production PostgreSQL (required by Render)
+        connect_args = {"sslmode": "require"}
     
     engine = create_engine(
-        settings.DATABASE_URL,
+        database_url,
         pool_size=5,
         max_overflow=10,
         pool_timeout=30,
@@ -24,7 +30,7 @@ if settings.is_postgres:
 else:
     # SQLite configuration
     engine = create_engine(
-        settings.DATABASE_URL,
+        database_url,
         connect_args={"check_same_thread": False},
         echo=settings.DEBUG,
     )
