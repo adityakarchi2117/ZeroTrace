@@ -156,6 +156,36 @@ async def lifespan(app: FastAPI):
                 inspector = inspect(engine)
                 tables = inspector.get_table_names()
                 
+                # ---- Migrate users table: add missing columns ----
+                if 'users' in tables:
+                    user_columns = {col['name'] for col in inspector.get_columns('users')}
+                    user_migrations = []
+                    
+                    missing_cols = {
+                        'is_disabled': 'BOOLEAN DEFAULT FALSE',
+                        'disabled_at': 'TIMESTAMP',
+                        'deleted_at': 'TIMESTAMP',
+                        'settings': 'JSON',
+                        'last_username_change': 'TIMESTAMP',
+                        'previous_usernames': 'JSON',
+                    }
+                    
+                    for col_name, col_type in missing_cols.items():
+                        if col_name not in user_columns:
+                            user_migrations.append(f"ADD COLUMN {col_name} {col_type}")
+                            logger.info(f"  -> Will add to users: {col_name}")
+                    
+                    if user_migrations:
+                        for migration in user_migrations:
+                            sql = f"ALTER TABLE users {migration}"
+                            logger.info(f"  Executing: {sql}")
+                            conn.execute(text(sql))
+                        conn.commit()
+                        logger.info("✅ Users table migration completed!")
+                    else:
+                        logger.info("✅ Users table schema up to date")
+                
+                # ---- Migrate friend_requests table ----
                 # Check if friend_requests table needs migration
                 if 'friend_requests' in tables:
                     columns = {col['name']: col for col in inspector.get_columns('friend_requests')}

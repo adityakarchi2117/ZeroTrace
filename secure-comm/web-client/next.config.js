@@ -2,6 +2,11 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
+    // Only proxy to localhost in development; on Vercel the frontend
+    // talks directly to the Render backend via NEXT_PUBLIC_API_URL
+    if (process.env.NODE_ENV === 'production') {
+      return [];
+    }
     return [
       {
         source: '/api/:path*',
@@ -20,3 +25,4 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
+

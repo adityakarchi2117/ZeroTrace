@@ -36,6 +36,10 @@ def fix_users_table(engine):
             migrations.append("ADD COLUMN disabled_at TIMESTAMP")
             print("-> Will add: disabled_at")
         
+        if 'deleted_at' not in columns:
+            migrations.append("ADD COLUMN deleted_at TIMESTAMP")
+            print("-> Will add: deleted_at")
+        
         if 'settings' not in columns:
             migrations.append("ADD COLUMN settings JSON")
             print("-> Will add: settings")
