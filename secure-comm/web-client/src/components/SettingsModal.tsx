@@ -1429,16 +1429,17 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         { value: 'brutal' as BubbleStyle, label: 'Brutal', desc: 'Bold edges' },
                       ].map((option) => {
                         const isSelected = bubbleStyle === option.value;
+                        // Classes match ChatView's bubbleShapeClass for visual consistency
                         const previewClass = (() => {
                           switch (option.value) {
-                            case 'glass': return 'backdrop-blur-md border border-white/20 bg-opacity-70';
-                            case 'neon': return 'shadow-lg';
-                            case 'minimal': return 'rounded-md border border-white/10 shadow-none';
-                            case 'gradient': return 'rounded-lg';
-                            case 'retro': return 'rounded-none border-2 border-white/20 shadow-[2px_2px_0px_rgba(0,0,0,0.3)]';
-                            case 'elegant': return 'rounded-full';
-                            case 'brutal': return 'rounded-sm border-2 border-white/30 shadow-[3px_3px_0px_rgba(255,255,255,0.15)]';
-                            default: return 'rounded-lg';
+                            case 'glass': return 'rounded-2xl backdrop-blur-md border border-white/10';
+                            case 'neon': return 'rounded-2xl';
+                            case 'minimal': return 'rounded-lg border border-white/5 shadow-none';
+                            case 'gradient': return 'rounded-2xl';
+                            case 'retro': return 'rounded-none border-2 border-white/20 shadow-[3px_3px_0px_rgba(0,0,0,0.3)]';
+                            case 'elegant': return 'rounded-3xl border border-white/5';
+                            case 'brutal': return 'rounded-sm border-2 border-white/30 shadow-[4px_4px_0px_rgba(255,255,255,0.15)]';
+                            default: return 'rounded-2xl';
                           }
                         })();
                         return (
