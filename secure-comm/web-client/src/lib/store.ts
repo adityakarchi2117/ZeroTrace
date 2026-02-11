@@ -1837,8 +1837,8 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     // If we're currently chatting with the removed user, close the conversation
     const state = get();
     const removedUsername = data.removed_username || data.data?.removed_username;
-    if (removedUsername && state.activeConversation === removedUsername) {
-      set({ activeConversation: null, messages: [] });
+    if (removedUsername && state.currentConversation === removedUsername) {
+      set({ currentConversation: null, messages: new Map() });
     }
     window.dispatchEvent(new CustomEvent('contacts_sync', { detail: { reason: 'contact_removed_self', ...data } }));
   });
