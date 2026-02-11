@@ -1871,11 +1871,26 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
       syncedReadMessageIds.add(messageId);
       // Update local message state to reflect read status
       const state = get();
-      const updatedMessages = state.messages.map((msg) =>
-        msg.id === messageId ? { ...msg, status: 'read' as const } : msg
-      );
-      if (updatedMessages !== state.messages) {
-        set({ messages: updatedMessages });
+      const updatedMessagesMap = new Map(state.messages);
+      let wasUpdated = false;
+
+      // Iterate through all conversations to find and update the message
+      for (const [username, conversationMessages] of updatedMessagesMap.entries()) {
+        const messageIndex = conversationMessages.findIndex(msg => msg.id === messageId);
+        if (messageIndex !== -1) {
+          const updatedConversationMessages = [...conversationMessages];
+          updatedConversationMessages[messageIndex] = {
+            ...updatedConversationMessages[messageIndex],
+            status: 'read' as const,
+          };
+          updatedMessagesMap.set(username, updatedConversationMessages);
+          wasUpdated = true;
+          break; // Found and updated, no need to continue
+        }
+      }
+
+      if (wasUpdated) {
+        set({ messages: updatedMessagesMap });
       }
     }
   });
