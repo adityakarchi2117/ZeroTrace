@@ -19,6 +19,10 @@ Endpoints:
   POST /keys/session/rewrap     — Batch re-wrap session keys after DEK rotation
   POST /keys/backup             — Create encrypted backup
   POST /keys/restore-backup     — Restore from backup
+  POST /keys/recovery/backup    — Store password-derived DEK recovery backup
+  GET  /keys/recovery/backup    — Retrieve recovery backup for DEK restoration
+  GET  /keys/recovery/status    — Check if recovery backup exists
+  DELETE /keys/recovery/backup  — Deactivate all recovery backups
 
 Rate-limited, device-fingerprinted, signature-validated.
 """
@@ -47,6 +51,8 @@ from app.models.device_sync import (
     KeyRestoreRequest, KeyRestoreResponse,
     DeviceWrappedDEKResponse,
     RevocationLogEntry,
+    RecoveryBackupRequest, RecoveryBackupResponse,
+    RecoveryRestoreResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -620,3 +626,90 @@ async def register_device(
 
     logger.info(f"📱 Device registered: {device_id} (primary={is_primary})")
     return auth
+
+
+# ==================== Recovery Key Backup ====================
+
+@router.post("/keys/recovery/backup", response_model=RecoveryBackupResponse, status_code=201)
+async def create_recovery_backup(
+    payload: RecoveryBackupRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Store a password-derived recovery backup for the DEK.
+
+    The client derives a key from the user's password using PBKDF2 or Argon2,
+    encrypts the DEK with that key, then uploads the ciphertext + KDF params.
+    The server never sees the raw password or derived key.
+    """
+    repo = DeviceSyncRepository(db)
+
+    backup = repo.store_recovery_backup(
+        user_id=user_id,
+        encrypted_dek=payload.encrypted_dek,
+        encryption_nonce=payload.encryption_nonce,
+        encryption_algorithm=payload.encryption_algorithm,
+        kdf_salt=payload.kdf_salt,
+        kdf_algorithm=payload.kdf_algorithm,
+        kdf_iterations=payload.kdf_iterations,
+        kdf_memory=payload.kdf_memory,
+        kdf_parallelism=payload.kdf_parallelism,
+        dek_version=payload.dek_version,
+    )
+
+    logger.info(f"🔑 Recovery backup created for user {user_id}, DEK v{payload.dek_version}")
+    return backup
+
+
+@router.get("/keys/recovery/backup", response_model=RecoveryRestoreResponse)
+async def get_recovery_backup(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve the encrypted DEK + KDF params for password-based recovery.
+
+    The client uses the returned KDF params to re-derive the same key
+    from the user's password, then decrypts the DEK locally.
+    """
+    repo = DeviceSyncRepository(db)
+    backup = repo.get_active_recovery_backup(user_id)
+
+    if not backup:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active recovery backup found. Create one first.",
+        )
+
+    # Mark as used for audit trail
+    repo.mark_recovery_used(user_id)
+
+    logger.info(f"🔑 Recovery backup retrieved for user {user_id}")
+    return backup
+
+
+@router.get("/keys/recovery/status")
+async def check_recovery_status(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Check whether the user has an active recovery backup."""
+    repo = DeviceSyncRepository(db)
+    has_backup = repo.has_recovery_backup(user_id)
+    return {"has_recovery_backup": has_backup}
+
+
+@router.delete("/keys/recovery/backup")
+async def delete_recovery_backup(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Deactivate all recovery backups.
+    Should be called when the user changes their password.
+    """
+    repo = DeviceSyncRepository(db)
+    count = repo.deactivate_recovery_backups(user_id)
+    logger.info(f"🔑 Deactivated {count} recovery backups for user {user_id}")
+    return {"deactivated_count": count}

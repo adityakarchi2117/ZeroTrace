@@ -49,13 +49,34 @@ export default function ChatApp() {
 
   // Use a ref instead of state for lastMessageIds to avoid re-render loops
   const lastMessageIdsRef = useRef<Set<number>>(new Set());
+  // Track whether initial message load is done — suppress toasts for pre-existing messages
+  const initialLoadDoneRef = useRef(false);
+
+  // On first message load, seed lastMessageIdsRef with all existing message IDs
+  // so we only toast for genuinely NEW messages arriving via WebSocket
+  useEffect(() => {
+    if (!user || initialLoadDoneRef.current) return;
+    if (messages.size === 0) return;
+
+    messages.forEach((conversationMessages) => {
+      conversationMessages.forEach((msg) => {
+        lastMessageIdsRef.current.add(msg.id);
+      });
+    });
+    initialLoadDoneRef.current = true;
+  }, [messages, user]);
 
   // Show toast notifications for new messages (performance-optimized)
   useEffect(() => {
-    if (!user) return;
+    if (!user || !initialLoadDoneRef.current) return;
     
+    const { contacts } = useStore.getState();
+    const contactUsernames = new Set(contacts.map(c => c.contact_username));
+
     messages.forEach((conversationMessages, username) => {
       if (username === currentConversation) return;
+      // Only show toasts for messages from contacts
+      if (!contactUsernames.has(username)) return;
       
       conversationMessages.forEach((msg) => {
         if (!lastMessageIdsRef.current.has(msg.id) && msg.sender_username !== user.username) {

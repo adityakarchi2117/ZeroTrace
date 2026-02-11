@@ -11,6 +11,7 @@ import {
   generateFingerprint
 } from '@/lib/crypto';
 import { useAppearance } from '@/lib/useAppearance';
+import { fontStyles, loadBubbleStyle, loadFontStyle, BubbleStyle } from '@/lib/themeSync';
 import { wsManager } from '@/lib/websocket';
 import { webrtcService, CallState } from '@/lib/webrtc';
 import { useWebRTC } from '@/lib/useWebRTC';
@@ -114,6 +115,10 @@ export default function ChatView() {
   const accentColors = getAccentColors();
   const densityClasses = getDensityClasses();
   const fontClasses = getFontClasses();
+
+  // Load local user's bubble style and font for sent messages
+  const localBubbleStyle: BubbleStyle = typeof window !== 'undefined' ? loadBubbleStyle() : 'rounded';
+  const localFontClass = typeof window !== 'undefined' ? (fontStyles[loadFontStyle()] || 'font-sans') : 'font-sans';
 
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -1104,14 +1109,51 @@ export default function ChatView() {
               const getBubbleStyle = () => {
                 if (isDeleted) return undefined;
                 if (isMine) {
+                  // Apply gradient variant for the gradient bubble style
+                  if (localBubbleStyle === 'gradient') {
+                    const colors = accentColors;
+                    return { background: `linear-gradient(160deg, ${colors.primary}, ${colors.secondary}, ${colors.primary}dd)` };
+                  }
                   return { background: accentGradient };
                 } else if (msg.sender_theme?.accentGradient) {
+                  if (msg.sender_theme?.style === 'gradient' && msg.sender_theme?.accentPrimary) {
+                    return { background: `linear-gradient(160deg, ${msg.sender_theme.accentPrimary}, ${msg.sender_theme.accentSecondary}, ${msg.sender_theme.accentPrimary}dd)` };
+                  }
                   return { background: msg.sender_theme.accentGradient };
                 }
                 return undefined;
               };
 
               const hasIncomingTheme = !isMine && msg.sender_theme?.accentGradient;
+
+              // Determine the bubble style class for shape/border effects
+              const activeBubbleStyle = isMine ? localBubbleStyle : (msg.sender_theme?.style || 'rounded');
+              const bubbleShapeClass = (() => {
+                switch (activeBubbleStyle) {
+                  case 'minimal': return 'rounded-lg border border-white/5 shadow-none';
+                  case 'retro': return 'rounded-none border-2 border-white/20 shadow-[3px_3px_0px_rgba(0,0,0,0.3)]';
+                  case 'elegant': return 'rounded-3xl border border-white/5';
+                  case 'brutal': return 'rounded-sm border-2 border-white/30 shadow-[4px_4px_0px_rgba(255,255,255,0.15)]';
+                  case 'glass': return 'rounded-2xl backdrop-blur-md border border-white/10';
+                  case 'neon': return 'rounded-2xl';
+                  case 'gradient': return 'rounded-2xl';
+                  default: return 'rounded-2xl';
+                }
+              })();
+
+              // Neon glow effect
+              const neonShadow = activeBubbleStyle === 'neon'
+                ? (isMine
+                  ? { boxShadow: `0 0 15px ${accentColors.primary}40, 0 0 30px ${accentColors.primary}20` }
+                  : msg.sender_theme?.accentPrimary
+                    ? { boxShadow: `0 0 15px ${msg.sender_theme.accentPrimary}40, 0 0 30px ${msg.sender_theme.accentPrimary}20` }
+                    : undefined)
+                : undefined;
+
+              // Determine font class for this bubble
+              const bubbleFontClass = isMine
+                ? localFontClass
+                : (msg.sender_theme?.font ? (fontStyles[msg.sender_theme.font as keyof typeof fontStyles] || 'font-sans') : 'font-sans');
 
               return (
                 <div key={`msg-${msg.id}`} className={densityClasses.messagePadding}>
@@ -1131,17 +1173,15 @@ export default function ChatView() {
                     <AnimatedMessageBubble isSent={isMine} isNew={isNew} index={index}>
                       <div
                         className={`
-                          relative max-w-[85%] ${densityClasses.bubblePadding} rounded-2xl ${fontClasses.base}
+                          relative max-w-[85%] ${densityClasses.bubblePadding} ${bubbleShapeClass} ${fontClasses.base} ${bubbleFontClass}
                           ${isMine
                             ? 'text-white rounded-br-md'
                             : hasIncomingTheme
                               ? 'text-white rounded-bl-md'
                               : 'bg-gray-800 dark:bg-gray-800 text-white dark:text-white rounded-bl-md'}
                           ${!isDeleted ? 'cursor-pointer' : ''}
-                          ${msg.sender_theme?.style === 'glass' ? 'backdrop-blur-md border border-white/10' : ''}
-                          ${msg.sender_theme?.style === 'neon' ? 'shadow-lg shadow-[var(--accent-color)]/30' : ''}
                         `}
-                        style={getBubbleStyle()}
+                        style={{ ...getBubbleStyle(), ...neonShadow }}
                         onContextMenu={(e) => !isDeleted && handleMessageContextMenu(e, msg.id, isMine)}
                       >
                         {renderMessageContent(msg)}

@@ -1828,6 +1828,57 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     // Dispatch custom event for UI components that listen to it (like Sidebar)
     window.dispatchEvent(new CustomEvent('contacts_sync', { detail: data }));
   });
+
+  // Handle contact_removed_self — sent to the initiator's other devices when THEY unfriend someone
+  wsManager.on('contact_removed_self', (data) => {
+    console.log('🔄 Contact removed (self-sync):', data);
+    get().loadContacts();
+    get().loadConversations();
+    // If we're currently chatting with the removed user, close the conversation
+    const state = get();
+    const removedUsername = data.removed_username || data.data?.removed_username;
+    if (removedUsername && state.activeConversation === removedUsername) {
+      set({ activeConversation: null, messages: [] });
+    }
+    window.dispatchEvent(new CustomEvent('contacts_sync', { detail: { reason: 'contact_removed_self', ...data } }));
+  });
+
+  // Track read message IDs synced from other devices
+  const syncedReadMessageIds = new Set<number>();
+
+  // Handle read_state_sync — bulk read state pushed on connect for cross-device consistency
+  wsManager.on('read_state_sync', (data) => {
+    console.log('📖 Read state sync received:', data);
+    const messageIds: number[] = data.read_message_ids || data.data?.read_message_ids || [];
+    for (const id of messageIds) {
+      syncedReadMessageIds.add(id);
+    }
+    // Keep the set bounded
+    if (syncedReadMessageIds.size > 5000) {
+      const iter = syncedReadMessageIds.values();
+      for (let i = 0; i < 1000; i++) {
+        const val = iter.next().value;
+        if (val !== undefined) syncedReadMessageIds.delete(val);
+      }
+    }
+  });
+
+  // Handle read_sync — individual read receipt synced from another device
+  wsManager.on('read_sync', (data) => {
+    console.log('📖 Read sync from other device:', data);
+    const messageId = data.message_id || data.data?.message_id;
+    if (messageId) {
+      syncedReadMessageIds.add(messageId);
+      // Update local message state to reflect read status
+      const state = get();
+      const updatedMessages = state.messages.map((msg) =>
+        msg.id === messageId ? { ...msg, status: 'read' as const } : msg
+      );
+      if (updatedMessages !== state.messages) {
+        set({ messages: updatedMessages });
+      }
+    }
+  });
 }
 
 declare module './api' {

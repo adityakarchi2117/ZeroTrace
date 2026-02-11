@@ -1,10 +1,14 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, JetBrains_Mono, Playfair_Display, Dancing_Script, Nunito } from 'next/font/google';
 import './globals.css';
 import AppearanceProvider from '@/components/AppearanceProvider';
 import { MotionProvider } from '@/lib/motion';
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-code' });
+const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-serif' });
+const dancingScript = Dancing_Script({ subsets: ['latin'], variable: '--font-cursive' });
+const nunito = Nunito({ subsets: ['latin'], variable: '--font-rounded' });
 
 export const metadata: Metadata = {
   title: 'ZeroTrace - Private by Design',
@@ -29,7 +33,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body className={`${inter.className} bg-gray-900 text-white antialiased`} suppressHydrationWarning>
+      <body className={`${inter.variable} ${jetbrainsMono.variable} ${playfair.variable} ${dancingScript.variable} ${nunito.variable} ${inter.className} bg-gray-900 text-white antialiased`} suppressHydrationWarning>
         <MotionProvider>
           <AppearanceProvider>
             <div id="root" className="min-h-screen">

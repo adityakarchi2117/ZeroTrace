@@ -856,10 +856,11 @@ class FriendRepository:
         return False
     
     def get_undelivered_notifications(self, user_id: int) -> List[Notification]:
-        """Get notifications that haven't been delivered via WebSocket"""
+        """Get notifications that haven't been delivered via WebSocket and not already read"""
         return self.db.query(Notification).filter(
             Notification.user_id == user_id,
             Notification.is_delivered == False,
+            Notification.is_read == False,
             or_(
                 Notification.expires_at == None,
                 Notification.expires_at > datetime.utcnow()
@@ -1012,6 +1013,26 @@ class FriendRepository:
                 },
                 related_user_id=user_id
             )
+        
+        # Cascade cleanup: mark stale notifications from/about the removed contact as read
+        # This prevents old friend_request, friend_request_accepted, etc. from re-appearing
+        self.db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.related_user_id == contact_user_id,
+            Notification.is_read == False
+        ).update({
+            "is_read": True,
+            "read_at": now
+        })
+        self.db.query(Notification).filter(
+            Notification.user_id == contact_user_id,
+            Notification.related_user_id == user_id,
+            Notification.is_read == False,
+            Notification.notification_type != NotificationTypeEnum.CONTACT_REMOVED
+        ).update({
+            "is_read": True,
+            "read_at": now
+        })
         
         self.db.commit()
         return True, ""

@@ -9,7 +9,7 @@ import profileApi from '@/lib/profileApi';
 import { PrivacySettings, VisibilityLevel, ActiveSession } from '@/lib/profileTypes';
 import VisibilitySelector from './VisibilitySelector';
 import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type, Camera, Save, Loader2, Eye, Lock, Smartphone, Globe, UserX, ChevronRight, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
-import { loadBubbleStyle, saveBubbleStyle, loadFontStyle, saveFontStyle, bubbleStyles, fontStyles } from '@/lib/themeSync';
+import { loadBubbleStyle, saveBubbleStyle, loadFontStyle, saveFontStyle, bubbleStyles, fontStyles, BubbleStyle, FontStyle } from '@/lib/themeSync';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -27,8 +27,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, accent, fontSize, density, messagePreview, animationsEnabled } = settings;
 
   // Bubble style and font state
-  const [bubbleStyle, setBubbleStyle] = useState<'rounded' | 'glass' | 'neon'>('rounded');
-  const [fontStyle, setFontStyle] = useState<'inter' | 'mono'>('inter');
+  const [bubbleStyle, setBubbleStyle] = useState<BubbleStyle>('rounded');
+  const [fontStyle, setFontStyle] = useState<FontStyle>('inter');
 
   // Load bubble style and font preferences on mount
   useEffect(() => {
@@ -50,13 +50,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   };
 
   // Update bubble style
-  const handleBubbleStyleChange = (style: 'rounded' | 'glass' | 'neon') => {
+  const handleBubbleStyleChange = (style: BubbleStyle) => {
     setBubbleStyle(style);
     saveBubbleStyle(style);
   };
 
   // Update font style
-  const handleFontStyleChange = (font: 'inter' | 'mono') => {
+  const handleFontStyleChange = (font: FontStyle) => {
     setFontStyle(font);
     saveFontStyle(font);
   };
@@ -1417,37 +1417,51 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Bubble Style
                     </p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-2">
                       {[
-                        { value: 'rounded' as const, label: 'Rounded', desc: 'Classic' },
-                        { value: 'glass' as const, label: 'Glass', desc: 'Translucent' },
-                        { value: 'neon' as const, label: 'Neon', desc: 'Glow effect' },
+                        { value: 'rounded' as BubbleStyle, label: 'Rounded', desc: 'Classic smooth' },
+                        { value: 'glass' as BubbleStyle, label: 'Glass', desc: 'Translucent' },
+                        { value: 'neon' as BubbleStyle, label: 'Neon', desc: 'Glow effect' },
+                        { value: 'minimal' as BubbleStyle, label: 'Minimal', desc: 'Clean & flat' },
+                        { value: 'gradient' as BubbleStyle, label: 'Gradient', desc: 'Multi-tone' },
+                        { value: 'retro' as BubbleStyle, label: 'Retro', desc: 'Pixel sharp' },
+                        { value: 'elegant' as BubbleStyle, label: 'Elegant', desc: 'Soft & round' },
+                        { value: 'brutal' as BubbleStyle, label: 'Brutal', desc: 'Bold edges' },
                       ].map((option) => {
                         const isSelected = bubbleStyle === option.value;
+                        const previewClass = (() => {
+                          switch (option.value) {
+                            case 'glass': return 'backdrop-blur-md border border-white/20 bg-opacity-70';
+                            case 'neon': return 'shadow-lg';
+                            case 'minimal': return 'rounded-md border border-white/10 shadow-none';
+                            case 'gradient': return 'rounded-lg';
+                            case 'retro': return 'rounded-none border-2 border-white/20 shadow-[2px_2px_0px_rgba(0,0,0,0.3)]';
+                            case 'elegant': return 'rounded-full';
+                            case 'brutal': return 'rounded-sm border-2 border-white/30 shadow-[3px_3px_0px_rgba(255,255,255,0.15)]';
+                            default: return 'rounded-lg';
+                          }
+                        })();
                         return (
                           <button
                             key={option.value}
                             onClick={() => handleBubbleStyleChange(option.value)}
-                            className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all ${isSelected
+                            className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border-2 transition-all ${isSelected
                               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                               : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                               }`}
                           >
                             <div
-                              className={`w-12 h-8 rounded-lg flex items-center justify-center ${option.value === 'glass'
-                                ? 'backdrop-blur-md border border-white/20'
-                                : option.value === 'neon'
-                                  ? 'shadow-lg'
-                                  : ''
-                                }`}
+                              className={`w-12 h-7 flex items-center justify-center ${previewClass}`}
                               style={{
-                                background: `linear-gradient(135deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary})`,
+                                background: option.value === 'gradient'
+                                  ? `linear-gradient(160deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary}, ${accentColors[accent].primary}dd)`
+                                  : `linear-gradient(135deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary})`,
                                 boxShadow: option.value === 'neon' ? `0 0 10px ${accentColors[accent].primary}50` : undefined
                               }}
                             >
-                              <Circle className="w-3 h-3 text-white" />
+                              <Circle className="w-2.5 h-2.5 text-white" />
                             </div>
-                            <span className={`text-xs font-medium ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                            <span className={`text-[10px] font-medium leading-tight ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}>
                               {option.label}
                             </span>
                           </button>
@@ -1461,27 +1475,31 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Message Font
                     </p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-2">
                       {[
-                        { value: 'inter' as const, label: 'Sans-serif', sample: 'Hello!' },
-                        { value: 'mono' as const, label: 'Monospace', sample: 'Hello!' },
+                        { value: 'inter' as FontStyle, label: 'Sans-serif', sample: 'Hello!', fontClass: 'font-sans' },
+                        { value: 'mono' as FontStyle, label: 'Monospace', sample: 'Hello!', fontClass: 'font-mono' },
+                        { value: 'serif' as FontStyle, label: 'Serif', sample: 'Hello!', fontClass: 'font-serif' },
+                        { value: 'cursive' as FontStyle, label: 'Cursive', sample: 'Hello!', fontClass: 'font-cursive' },
+                        { value: 'rounded' as FontStyle, label: 'Rounded', sample: 'Hello!', fontClass: 'font-rounded' },
+                        { value: 'code' as FontStyle, label: 'Code', sample: 'Hello!', fontClass: 'font-code' },
                       ].map((option) => {
                         const isSelected = fontStyle === option.value;
                         return (
                           <button
                             key={option.value}
                             onClick={() => handleFontStyleChange(option.value)}
-                            className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${isSelected
+                            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 transition-all ${isSelected
                               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                               : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                               }`}
                           >
-                            <Type className={`w-5 h-5 ${isSelected ? 'text-blue-500' : 'text-gray-500'}`} />
-                            <div className="text-left">
-                              <p className={`text-sm font-medium ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                            <Type className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-blue-500' : 'text-gray-500'}`} />
+                            <div className="text-left min-w-0">
+                              <p className={`text-xs font-medium leading-tight ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}>
                                 {option.label}
                               </p>
-                              <p className={`text-xs text-gray-500 ${option.value === 'mono' ? 'font-mono' : 'font-sans'}`}>
+                              <p className={`text-[11px] text-gray-500 ${option.fontClass} truncate`}>
                                 {option.sample}
                               </p>
                             </div>
@@ -1522,8 +1540,24 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                     <div className="flex justify-end mt-3">
                       <div
-                        className="px-4 py-2 rounded-2xl text-white max-w-xs"
-                        style={{ background: `linear-gradient(135deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary})` }}
+                        className={`px-4 py-2 text-white max-w-xs ${fontStyles[fontStyle] || 'font-sans'} ${(() => {
+                          switch (bubbleStyle) {
+                            case 'minimal': return 'rounded-lg border border-white/5';
+                            case 'retro': return 'rounded-none border-2 border-white/20 shadow-[3px_3px_0px_rgba(0,0,0,0.3)]';
+                            case 'elegant': return 'rounded-3xl';
+                            case 'brutal': return 'rounded-sm border-2 border-white/30 shadow-[4px_4px_0px_rgba(255,255,255,0.15)]';
+                            case 'glass': return 'rounded-2xl backdrop-blur-md border border-white/10';
+                            case 'neon': return 'rounded-2xl';
+                            case 'gradient': return 'rounded-2xl';
+                            default: return 'rounded-2xl';
+                          }
+                        })()}`}
+                        style={{
+                          background: bubbleStyle === 'gradient'
+                            ? `linear-gradient(160deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary}, ${accentColors[accent].primary}dd)`
+                            : `linear-gradient(135deg, ${accentColors[accent].primary}, ${accentColors[accent].secondary})`,
+                          boxShadow: bubbleStyle === 'neon' ? `0 0 15px ${accentColors[accent].primary}40, 0 0 30px ${accentColors[accent].primary}20` : undefined,
+                        }}
                       >
                         <p>Looking great! ✨</p>
                         <div className="flex justify-end mt-1">

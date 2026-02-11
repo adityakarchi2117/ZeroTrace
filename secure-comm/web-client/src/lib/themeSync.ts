@@ -8,12 +8,18 @@
 
 import { AccentColor, accentColors } from './useAppearance';
 
+// All available bubble styles
+export type BubbleStyle = 'rounded' | 'glass' | 'neon' | 'minimal' | 'gradient' | 'retro' | 'elegant' | 'brutal';
+
+// All available font styles
+export type FontStyle = 'inter' | 'mono' | 'serif' | 'cursive' | 'rounded' | 'code';
+
 // Theme metadata that travels with each message
 export interface MessageTheme {
     bubbleColor: string;
     textColor: string;
-    style: 'rounded' | 'glass' | 'neon';
-    font: 'inter' | 'mono';
+    style: BubbleStyle;
+    font: FontStyle;
     accentGradient?: string;
     accentPrimary?: string;
     accentSecondary?: string;
@@ -27,7 +33,7 @@ export interface ThemedMessage {
 }
 
 // Bubble style configurations
-export const bubbleStyles: Record<'rounded' | 'glass' | 'neon', {
+export const bubbleStyles: Record<BubbleStyle, {
     className: string;
     overlayClassName?: string;
 }> = {
@@ -41,13 +47,36 @@ export const bubbleStyles: Record<'rounded' | 'glass' | 'neon', {
         className: 'rounded-2xl shadow-lg',
         overlayClassName: 'ring-2 ring-opacity-50',
     },
+    minimal: {
+        className: 'rounded-lg shadow-none border border-white/5',
+    },
+    gradient: {
+        className: 'rounded-2xl shadow-md',
+    },
+    retro: {
+        className: 'rounded-none border-2 border-white/20 shadow-[3px_3px_0px_rgba(0,0,0,0.3)]',
+    },
+    elegant: {
+        className: 'rounded-3xl shadow-md border border-white/5',
+    },
+    brutal: {
+        className: 'rounded-sm border-2 border-white/30 shadow-[4px_4px_0px_rgba(255,255,255,0.15)]',
+    },
 };
 
 // Font configurations
-export const fontStyles: Record<'inter' | 'mono', string> = {
+export const fontStyles: Record<FontStyle, string> = {
     inter: 'font-sans',
     mono: 'font-mono',
+    serif: 'font-serif',
+    cursive: 'font-cursive',
+    rounded: 'font-rounded',
+    code: 'font-code',
 };
+
+// Valid style/font arrays for validation
+export const validBubbleStyles: BubbleStyle[] = ['rounded', 'glass', 'neon', 'minimal', 'gradient', 'retro', 'elegant', 'brutal'];
+export const validFontStyles: FontStyle[] = ['inter', 'mono', 'serif', 'cursive', 'rounded', 'code'];
 
 // Default fallback theme
 export const defaultMessageTheme: MessageTheme = {
@@ -61,7 +90,7 @@ export const defaultMessageTheme: MessageTheme = {
 };
 
 // Build theme from current appearance settings
-export function buildMessageTheme(accent: AccentColor, customStyle?: 'rounded' | 'glass' | 'neon', customFont?: 'inter' | 'mono'): MessageTheme {
+export function buildMessageTheme(accent: AccentColor, customStyle?: BubbleStyle, customFont?: FontStyle): MessageTheme {
     const colors = accentColors[accent];
     return {
         bubbleColor: colors.primary,
@@ -108,20 +137,47 @@ export function getBubbleClasses(theme: MessageTheme): string {
 
 // Get inline style for bubble background
 export function getBubbleStyle(theme: MessageTheme): React.CSSProperties {
+    // Gradient style uses a diagonal multi-stop gradient
+    if (theme.style === 'gradient' && theme.accentPrimary && theme.accentSecondary) {
+        return {
+            background: `linear-gradient(160deg, ${theme.accentPrimary}, ${theme.accentSecondary}, ${theme.accentPrimary}dd)`,
+        };
+    }
     if (theme.accentGradient) {
         return { background: theme.accentGradient };
     }
     return { backgroundColor: theme.bubbleColor };
 }
 
-// Get neon ring style if applicable
-export function getNeonRingStyle(theme: MessageTheme): React.CSSProperties | undefined {
-    if (theme.style === 'neon') {
-        return {
-            boxShadow: `0 0 15px ${theme.bubbleColor}40, 0 0 30px ${theme.bubbleColor}20`,
-        };
+// Get extra inline styles for special bubble effects
+export function getExtraBubbleStyle(theme: MessageTheme): React.CSSProperties | undefined {
+    switch (theme.style) {
+        case 'neon':
+            return {
+                boxShadow: `0 0 15px ${theme.bubbleColor}40, 0 0 30px ${theme.bubbleColor}20`,
+            };
+        case 'retro':
+            return {
+                imageRendering: 'pixelated' as any,
+                letterSpacing: '0.02em',
+            };
+        case 'elegant':
+            return {
+                letterSpacing: '0.03em',
+            };
+        case 'brutal':
+            return {
+                textTransform: 'none' as any,
+                letterSpacing: '0.01em',
+            };
+        default:
+            return undefined;
     }
-    return undefined;
+}
+
+// Get neon ring style if applicable (kept for backward compat)
+export function getNeonRingStyle(theme: MessageTheme): React.CSSProperties | undefined {
+    return getExtraBubbleStyle(theme);
 }
 
 // Storage key for custom bubble style preference
@@ -129,12 +185,12 @@ const BUBBLE_STYLE_KEY = 'zerotrace_bubble_style';
 const FONT_STYLE_KEY = 'zerotrace_font_style';
 
 // Load saved bubble style preference
-export function loadBubbleStyle(): 'rounded' | 'glass' | 'neon' {
+export function loadBubbleStyle(): BubbleStyle {
     if (typeof window === 'undefined') return 'rounded';
     try {
         const saved = localStorage.getItem(BUBBLE_STYLE_KEY);
-        if (saved && ['rounded', 'glass', 'neon'].includes(saved)) {
-            return saved as 'rounded' | 'glass' | 'neon';
+        if (saved && validBubbleStyles.includes(saved as BubbleStyle)) {
+            return saved as BubbleStyle;
         }
     } catch (e) {
         console.error('Failed to load bubble style:', e);
@@ -143,7 +199,7 @@ export function loadBubbleStyle(): 'rounded' | 'glass' | 'neon' {
 }
 
 // Save bubble style preference
-export function saveBubbleStyle(style: 'rounded' | 'glass' | 'neon'): void {
+export function saveBubbleStyle(style: BubbleStyle): void {
     if (typeof window === 'undefined') return;
     try {
         localStorage.setItem(BUBBLE_STYLE_KEY, style);
@@ -153,12 +209,12 @@ export function saveBubbleStyle(style: 'rounded' | 'glass' | 'neon'): void {
 }
 
 // Load saved font style preference
-export function loadFontStyle(): 'inter' | 'mono' {
+export function loadFontStyle(): FontStyle {
     if (typeof window === 'undefined') return 'inter';
     try {
         const saved = localStorage.getItem(FONT_STYLE_KEY);
-        if (saved && ['inter', 'mono'].includes(saved)) {
-            return saved as 'inter' | 'mono';
+        if (saved && validFontStyles.includes(saved as FontStyle)) {
+            return saved as FontStyle;
         }
     } catch (e) {
         console.error('Failed to load font style:', e);
@@ -167,7 +223,7 @@ export function loadFontStyle(): 'inter' | 'mono' {
 }
 
 // Save font style preference
-export function saveFontStyle(font: 'inter' | 'mono'): void {
+export function saveFontStyle(font: FontStyle): void {
     if (typeof window === 'undefined') return;
     try {
         localStorage.setItem(FONT_STYLE_KEY, font);
@@ -186,8 +242,8 @@ export function parseMessageTheme(messageData: any): MessageTheme | null {
                 return {
                     bubbleColor: theme.bubbleColor,
                     textColor: theme.textColor,
-                    style: ['rounded', 'glass', 'neon'].includes(theme.style) ? theme.style : 'rounded',
-                    font: ['inter', 'mono'].includes(theme.font) ? theme.font : 'inter',
+                    style: validBubbleStyles.includes(theme.style) ? theme.style : 'rounded',
+                    font: validFontStyles.includes(theme.font) ? theme.font : 'inter',
                     accentGradient: theme.accentGradient,
                     accentPrimary: theme.accentPrimary,
                     accentSecondary: theme.accentSecondary,

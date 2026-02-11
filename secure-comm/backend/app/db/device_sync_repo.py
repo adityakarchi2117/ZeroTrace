@@ -19,6 +19,7 @@ from app.db.device_sync_models import (
     DeviceAuthorization,
     EncryptedSessionKey,
     DeviceRevocationLog,
+    RecoveryKeyBackup,
 )
 
 
@@ -531,4 +532,113 @@ class DeviceSyncRepository:
             .order_by(desc(DeviceRevocationLog.created_at))
             .limit(limit)
             .all()
+        )
+
+    # ==================== Recovery Key Backup ====================
+
+    def store_recovery_backup(
+        self,
+        user_id: int,
+        encrypted_dek: str,
+        encryption_nonce: str,
+        kdf_salt: str,
+        dek_version: int,
+        encryption_algorithm: str = "xsalsa20-poly1305",
+        kdf_algorithm: str = "pbkdf2-sha256",
+        kdf_iterations: int = 600000,
+        kdf_memory: Optional[int] = None,
+        kdf_parallelism: Optional[int] = None,
+    ) -> RecoveryKeyBackup:
+        """
+        Store a password-derived recovery backup of the user's DEK.
+
+        Deactivates any existing active backups first (one active backup per user).
+        The client is responsible for deriving the encryption key from the
+        user's password and encrypting the DEK before calling this.
+        """
+        # Deactivate previous active backups
+        self.db.query(RecoveryKeyBackup).filter(
+            and_(
+                RecoveryKeyBackup.user_id == user_id,
+                RecoveryKeyBackup.is_active == True,
+            )
+        ).update({"is_active": False, "updated_at": datetime.utcnow()})
+
+        backup = RecoveryKeyBackup(
+            user_id=user_id,
+            encrypted_dek=encrypted_dek,
+            encryption_nonce=encryption_nonce,
+            encryption_algorithm=encryption_algorithm,
+            kdf_salt=kdf_salt,
+            kdf_algorithm=kdf_algorithm,
+            kdf_iterations=kdf_iterations,
+            kdf_memory=kdf_memory,
+            kdf_parallelism=kdf_parallelism,
+            dek_version=dek_version,
+            is_active=True,
+        )
+        self.db.add(backup)
+        self.db.commit()
+        self.db.refresh(backup)
+        return backup
+
+    def get_active_recovery_backup(
+        self, user_id: int
+    ) -> Optional[RecoveryKeyBackup]:
+        """Get the current active recovery backup for a user."""
+        return (
+            self.db.query(RecoveryKeyBackup)
+            .filter(
+                and_(
+                    RecoveryKeyBackup.user_id == user_id,
+                    RecoveryKeyBackup.is_active == True,
+                )
+            )
+            .first()
+        )
+
+    def mark_recovery_used(self, user_id: int) -> bool:
+        """
+        Mark the active recovery backup as used (updates last_used_at).
+        Called after a successful DEK recovery via password.
+        Returns True if an active backup existed and was updated.
+        """
+        backup = self.get_active_recovery_backup(user_id)
+        if not backup:
+            return False
+        backup.last_used_at = datetime.utcnow()
+        self.db.commit()
+        return True
+
+    def deactivate_recovery_backups(self, user_id: int) -> int:
+        """
+        Deactivate all recovery backups for a user.
+        Called when user changes password or rotates DEK.
+        Returns the number of backups deactivated.
+        """
+        count = (
+            self.db.query(RecoveryKeyBackup)
+            .filter(
+                and_(
+                    RecoveryKeyBackup.user_id == user_id,
+                    RecoveryKeyBackup.is_active == True,
+                )
+            )
+            .update({"is_active": False, "updated_at": datetime.utcnow()})
+        )
+        self.db.commit()
+        return count
+
+    def has_recovery_backup(self, user_id: int) -> bool:
+        """Check whether the user has an active recovery backup."""
+        return (
+            self.db.query(RecoveryKeyBackup)
+            .filter(
+                and_(
+                    RecoveryKeyBackup.user_id == user_id,
+                    RecoveryKeyBackup.is_active == True,
+                )
+            )
+            .count()
+            > 0
         )

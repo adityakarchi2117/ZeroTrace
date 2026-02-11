@@ -48,12 +48,13 @@ router = APIRouter()
 
 class ConnectionManager:
     """
-    Manages WebSocket connections with presence tracking and call signaling
+    Manages WebSocket connections with presence tracking and call signaling.
+    Supports multiple devices per user for multi-device sync.
     """
     
     def __init__(self):
-        # user_id -> WebSocket connection
-        self.active_connections: Dict[int, WebSocket] = {}
+        # user_id -> {device_id: WebSocket} (multi-device support)
+        self.active_connections: Dict[int, Dict[str, WebSocket]] = {}
         # username -> user_id mapping
         self.username_to_id: Dict[str, int] = {}
         # user_id -> set of user_ids subscribed to their presence
@@ -64,11 +65,26 @@ class ConnectionManager:
         self.user_info: Dict[int, dict] = {}
         # Active calls: call_id -> {caller_id, receiver_id, type}
         self.active_calls: Dict[str, dict] = {}
+        # Monotonic device counter for auto-generated device IDs
+        self._device_counter: int = 0
     
-    async def connect(self, user_id: int, username: str, websocket: WebSocket):
-        """Accept connection and notify presence subscribers"""
+    def _next_device_id(self) -> str:
+        """Generate a unique device ID for connections that don't provide one."""
+        self._device_counter += 1
+        return f"auto_{self._device_counter}_{datetime.utcnow().timestamp()}"
+    
+    async def connect(self, user_id: int, username: str, websocket: WebSocket, device_id: str = None):
+        """Accept connection and notify presence subscribers (multi-device aware)"""
         await websocket.accept()
-        self.active_connections[user_id] = websocket
+        
+        if device_id is None:
+            device_id = self._next_device_id()
+        
+        # Initialize device dict for user if needed
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = {}
+        self.active_connections[user_id][device_id] = websocket
+        
         self.username_to_id[username] = user_id
         self.last_activity[user_id] = datetime.utcnow()
         self.user_info[user_id] = {"username": username}
@@ -82,24 +98,41 @@ class ConnectionManager:
         # Deliver any pending messages
         await self._deliver_pending_messages(user_id)
         
+        # Sync read state so new device doesn't re-notify
+        asyncio.create_task(self._sync_read_state(user_id))
+        
         # Deliver pending notifications (friend requests, etc.)
         asyncio.create_task(self._deliver_pending_notifications(user_id))
         
         # Sync contacts to client for sidebar
         asyncio.create_task(self._sync_contacts(user_id))
+        
+        return device_id
     
-    def disconnect(self, user_id: int):
-        """Handle disconnection and notify subscribers"""
-        username = self.user_info.get(user_id, {}).get("username")
-        if username and username in self.username_to_id:
-            del self.username_to_id[username]
-            
-        if user_id in self.active_connections:
+    def disconnect(self, user_id: int, device_id: str = None):
+        """Handle disconnection and notify subscribers (multi-device aware)"""
+        if device_id and user_id in self.active_connections:
+            # Remove only the specific device
+            self.active_connections[user_id].pop(device_id, None)
+            # If no devices left, clean up fully
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+            else:
+                # User still has other devices, don't broadcast offline
+                return
+        elif user_id in self.active_connections:
+            # No device_id given — remove all (legacy/fallback)
             del self.active_connections[user_id]
-        if user_id in self.last_activity:
-            del self.last_activity[user_id]
-        if user_id in self.user_info:
-            del self.user_info[user_id]
+        
+        # Only clean up if user has NO connections left
+        if user_id not in self.active_connections:
+            username = self.user_info.get(user_id, {}).get("username")
+            if username and username in self.username_to_id:
+                del self.username_to_id[username]
+            if user_id in self.last_activity:
+                del self.last_activity[user_id]
+            if user_id in self.user_info:
+                del self.user_info[user_id]
         
         # Schedule offline presence broadcast
         asyncio.create_task(self._broadcast_presence(user_id, is_online=False))
@@ -109,23 +142,35 @@ class ConnectionManager:
         return self.username_to_id.get(username)
     
     def is_online(self, user_id: int) -> bool:
-        """Check if user is currently online"""
-        return user_id in self.active_connections
+        """Check if user is currently online (any device)"""
+        return user_id in self.active_connections and len(self.active_connections[user_id]) > 0
     
     def get_online_users(self, user_ids: list) -> list:
         """Get list of online users from given user IDs"""
-        return [uid for uid in user_ids if uid in self.active_connections]
+        return [uid for uid in user_ids if self.is_online(uid)]
     
     async def send_personal_message(self, message: dict, user_id: int) -> bool:
-        """Send message to specific user, return True if delivered"""
-        if user_id in self.active_connections:
+        """Send message to ALL devices of a specific user, return True if delivered to at least one"""
+        if user_id not in self.active_connections:
+            return False
+        
+        delivered = False
+        dead_devices = []
+        for device_id, ws in self.active_connections[user_id].items():
             try:
-                await self.active_connections[user_id].send_json(message)
-                return True
+                await ws.send_json(message)
+                delivered = True
             except Exception as e:
-                print(f"Error sending to user {user_id}: {e}")
-                self.disconnect(user_id)
-        return False
+                print(f"Error sending to user {user_id} device {device_id}: {e}")
+                dead_devices.append(device_id)
+        
+        # Clean up dead device connections
+        for device_id in dead_devices:
+            self.active_connections[user_id].pop(device_id, None)
+        if user_id in self.active_connections and not self.active_connections[user_id]:
+            self.disconnect(user_id)
+        
+        return delivered
     
     async def send_to_username(self, message: dict, username: str) -> bool:
         """Send message to user by username"""
@@ -142,13 +187,14 @@ class ConnectionManager:
         return results
     
     async def broadcast(self, message: dict, exclude: Optional[int] = None):
-        """Broadcast message to all connected users"""
-        for user_id, connection in self.active_connections.items():
+        """Broadcast message to all connected users (all devices)"""
+        for user_id, devices in self.active_connections.items():
             if user_id != exclude:
-                try:
-                    await connection.send_json(message)
-                except Exception:
-                    pass
+                for device_id, ws in devices.items():
+                    try:
+                        await ws.send_json(message)
+                    except Exception:
+                        pass
     
     def subscribe_to_presence(self, subscriber_id: int, target_user_id: int):
         """Subscribe to presence updates for a user"""
@@ -163,6 +209,10 @@ class ConnectionManager:
     
     async def _broadcast_presence(self, user_id: int, is_online: bool):
         """Notify all subscribers about user's presence change"""
+        # Don't broadcast offline if user still has active devices
+        if not is_online and self.is_online(user_id):
+            return
+        
         presence_update = {
             "type": "presence",
             "user_id": user_id,
@@ -172,7 +222,7 @@ class ConnectionManager:
         }
         
         # Broadcast to all connected users (simplified for reliability)
-        for uid in self.active_connections:
+        for uid in list(self.active_connections.keys()):
             if uid != user_id:
                 await self.send_personal_message(presence_update, uid)
     
@@ -189,9 +239,16 @@ class ConnectionManager:
             print(f"Error updating last_seen: {e}")
     
     async def _deliver_pending_messages(self, user_id: int):
-        """Deliver ALL unread messages that were sent while user was offline"""
+        """Deliver ALL unread messages that were sent while user was offline (contacts only)"""
         try:
             db = SessionLocal()
+            from app.db.friend_repo import FriendRepository
+            friend_repo = FriendRepository(db)
+
+            # Build set of contact user IDs for fast lookup
+            contacts = friend_repo.get_trusted_contacts(user_id)
+            contact_ids = {c.contact_user_id for c in contacts}
+
             # Get ALL messages that haven't been delivered yet (status = SENT)
             pending = db.query(Message).filter(
                 Message.recipient_id == user_id,
@@ -200,7 +257,16 @@ class ConnectionManager:
             ).order_by(Message.created_at).all()
             
             delivered_count = 0
+            skipped_count = 0
             for msg in pending:
+                # Skip messages from non-contacts — mark as delivered so they
+                # don't keep re-appearing on every reconnect
+                if msg.sender_id not in contact_ids:
+                    msg.status = MessageStatusEnum.DELIVERED
+                    msg.delivered_at = datetime.utcnow()
+                    skipped_count += 1
+                    continue
+
                 sender = db.query(User).filter(User.id == msg.sender_id).first()
                 if sender:
                     message_payload = {
@@ -224,6 +290,8 @@ class ConnectionManager:
             
             if delivered_count > 0:
                 print(f"✅ Delivered {delivered_count} pending messages to user {user_id}")
+            if skipped_count > 0:
+                print(f"⏭️ Skipped {skipped_count} messages from non-contacts for user {user_id}")
             
             db.commit()
             db.close()
@@ -314,6 +382,27 @@ class ConnectionManager:
         except Exception as e:
             print(f"❌ Error syncing contacts: {e}")
 
+    async def _sync_read_state(self, user_id: int):
+        """Sync read message IDs to new device so it doesn't re-notify for already-read messages"""
+        try:
+            db = SessionLocal()
+            read_messages = db.query(Message.id).filter(
+                Message.recipient_id == user_id,
+                Message.status == MessageStatusEnum.READ
+            ).order_by(Message.created_at.desc()).limit(500).all()
+            
+            if read_messages:
+                await self.send_personal_message({
+                    "type": "read_state_sync",
+                    "read_message_ids": [m.id for m in read_messages],
+                    "timestamp": datetime.utcnow().isoformat()
+                }, user_id)
+                print(f"📖 Synced {len(read_messages)} read markers to user {user_id}")
+            
+            db.close()
+        except Exception as e:
+            print(f"❌ Error syncing read state: {e}")
+
 
 manager = ConnectionManager()
 
@@ -321,10 +410,15 @@ manager = ConnectionManager()
 @router.websocket("/chat")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: str = Query(...)
+    token: str = Query(...),
+    device_id: str = Query(None)
 ):
     """
     Main WebSocket endpoint for real-time messaging and calls
+    
+    Query params:
+    - token: JWT auth token (required)
+    - device_id: unique device identifier for multi-device support (optional)
     
     Message Types:
     - message: Send encrypted message
@@ -348,7 +442,7 @@ async def websocket_endpoint(
     user_id = payload.get("user_id")
     username = payload.get("sub")
     
-    await manager.connect(user_id, username, websocket)
+    assigned_device_id = await manager.connect(user_id, username, websocket, device_id)
     
     try:
         # Send connection confirmation
@@ -357,6 +451,7 @@ async def websocket_endpoint(
             "message": "Connected to CipherLink",
             "user_id": user_id,
             "username": username,
+            "device_id": assigned_device_id,
             "timestamp": datetime.utcnow().isoformat()
         })
         
@@ -365,10 +460,10 @@ async def websocket_endpoint(
             await handle_websocket_message(user_id, username, data)
     
     except WebSocketDisconnect:
-        manager.disconnect(user_id)
+        manager.disconnect(user_id, assigned_device_id)
     except Exception as e:
         print(f"WebSocket error for user {user_id}: {e}")
-        manager.disconnect(user_id)
+        manager.disconnect(user_id, assigned_device_id)
 
 
 async def handle_websocket_message(user_id: int, username: str, raw_data: str):
@@ -510,10 +605,10 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
         "timestamp": timestamp.isoformat()
     }
     
-    # Try to deliver to recipient
+    # Try to deliver to recipient (all their devices)
     delivered = await manager.send_personal_message(message_payload, recipient_id)
     
-    # Send delivery confirmation to sender
+    # Send delivery confirmation to sender (all sender's devices)
     await manager.send_personal_message({
         "type": "message_sent",
         "message_id": db_message_id,
@@ -526,6 +621,11 @@ async def handle_encrypted_message(sender_id: int, sender_username: str, data: d
     # Update message status if delivered
     if delivered:
         await update_message_status(db_message_id, MessageStatusEnum.DELIVERED)
+    else:
+        # Schedule retry for undelivered messages
+        asyncio.create_task(_retry_message_delivery(
+            db_message_id, message_payload, recipient_id, max_retries=3, delay=10
+        ))
 
 
 async def handle_typing_indicator(sender_id: int, sender_username: str, data: dict):
@@ -546,14 +646,14 @@ async def handle_typing_indicator(sender_id: int, sender_username: str, data: di
 
 
 async def handle_read_receipt(user_id: int, data: dict):
-    """Handle read receipt - notify sender that message was read"""
+    """Handle read receipt - notify sender and sync to reader's other devices"""
     message_id = data.get("message_id") or data.get("data", {}).get("message_id")
     sender_id = data.get("sender_id") or data.get("data", {}).get("sender_id")
     
     # Update message status in database
     await update_message_status(message_id, MessageStatusEnum.READ)
     
-    # Notify sender
+    # Notify sender (all their devices)
     if sender_id:
         await manager.send_personal_message({
             "type": "read_receipt",
@@ -561,6 +661,13 @@ async def handle_read_receipt(user_id: int, data: dict):
             "reader_id": user_id,
             "timestamp": datetime.utcnow().isoformat()
         }, sender_id)
+    
+    # Sync read status to reader's OTHER devices so they suppress notifications
+    await manager.send_personal_message({
+        "type": "read_sync",
+        "message_id": message_id,
+        "timestamp": datetime.utcnow().isoformat()
+    }, user_id)
 
 
 async def handle_delivery_receipt(user_id: int, data: dict):
@@ -918,6 +1025,44 @@ async def store_message(
         return -1
 
 
+async def _retry_message_delivery(
+    message_id: int,
+    message_payload: dict,
+    recipient_id: int,
+    max_retries: int = 3,
+    delay: int = 10
+):
+    """
+    Retry delivering a message that couldn't be delivered initially.
+    Uses exponential backoff. If recipient comes online during retries,
+    the message will be delivered immediately.
+    """
+    for attempt in range(1, max_retries + 1):
+        await asyncio.sleep(delay * attempt)  # Exponential backoff
+        
+        # Check if message was already delivered (via reconnect pending delivery)
+        try:
+            db = SessionLocal()
+            msg = db.query(Message).filter(Message.id == message_id).first()
+            if msg and msg.status != MessageStatusEnum.SENT:
+                # Already delivered or read — stop retrying
+                db.close()
+                return
+            db.close()
+        except Exception:
+            pass
+        
+        # Try delivery again
+        if manager.is_online(recipient_id):
+            delivered = await manager.send_personal_message(message_payload, recipient_id)
+            if delivered:
+                await update_message_status(message_id, MessageStatusEnum.DELIVERED)
+                print(f"✅ Retry {attempt}: Delivered message {message_id} to user {recipient_id}")
+                return
+    
+    print(f"⏳ Message {message_id} still pending after {max_retries} retries — will deliver on reconnect")
+
+
 async def update_message_status(message_id: int, status: MessageStatusEnum):
     """Update message status in database"""
     try:
@@ -984,17 +1129,34 @@ async def notify_friend_request_rejected(sender_id: int, rejecter_username: str)
     return delivered
 
 
-async def notify_contact_removed(user_id: int, removed_by_username: str):
+async def notify_contact_removed(user_id: int, removed_by_username: str, initiator_id: int = None):
     """
-    Notify user that they were removed from someone's contacts
+    Notify user that they were removed from someone's contacts.
+    Also notify initiator's other devices to update their sidebar.
+    Also trigger contacts_sync for both users.
     """
     notification = {
         "type": "contact_removed",
         "removed_by": removed_by_username,
+        "removed_user_id": user_id,
         "timestamp": datetime.utcnow().isoformat()
     }
     
     delivered = await manager.send_personal_message(notification, user_id)
+    
+    # Notify initiator's own devices to remove the contact from their sidebar
+    if initiator_id:
+        await manager.send_personal_message({
+            "type": "contact_removed_self",
+            "contact_user_id": user_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }, initiator_id)
+        # Re-sync contacts for both users so sidebars are authoritative
+        asyncio.create_task(manager._sync_contacts(initiator_id))
+    
+    # Re-sync contacts for the removed user
+    asyncio.create_task(manager._sync_contacts(user_id))
+    
     return delivered
 
 

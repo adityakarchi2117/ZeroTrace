@@ -7,6 +7,7 @@ Tables for:
 - DeviceAuthorization: Approved devices with fingerprints
 - EncryptedSessionKey: Wrapped session keys for message history sync
 - DeviceRevocationLog: Audit trail for revocations
+- RecoveryKeyBackup: Password-derived recovery key for DEK backup
 """
 
 from sqlalchemy import (
@@ -227,4 +228,55 @@ class DeviceRevocationLog(Base):
 
     __table_args__ = (
         Index('ix_dev_revoke_user', 'user_id'),
+    )
+
+
+class RecoveryKeyBackup(Base):
+    """
+    Password-derived recovery key backup for DEK.
+
+    When all devices are lost, the user can recover their DEK
+    using their password. The DEK is encrypted with a key derived
+    from the user's password via Argon2/PBKDF2 (done client-side).
+
+    The server stores ONLY the encrypted DEK + salt + parameters.
+    It NEVER sees the raw password or derived key.
+
+    Flow:
+      1. Client derives recovery_key from password using PBKDF2/Argon2
+      2. Client encrypts DEK with recovery_key
+      3. Client uploads encrypted_dek + salt + kdf_params
+      4. On recovery: client re-derives key → decrypts DEK → restores access
+    """
+    __tablename__ = "recovery_key_backups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # DEK encrypted with password-derived key
+    encrypted_dek = Column(Text, nullable=False)
+    encryption_nonce = Column(String(100), nullable=False)
+    encryption_algorithm = Column(String(100), default="xsalsa20-poly1305")
+
+    # KDF parameters (so client can re-derive the same key)
+    kdf_salt = Column(String(200), nullable=False)
+    kdf_algorithm = Column(String(50), default="pbkdf2-sha256")  # or argon2id
+    kdf_iterations = Column(Integer, default=600000)
+    kdf_memory = Column(Integer, nullable=True)  # For Argon2 only (KB)
+    kdf_parallelism = Column(Integer, nullable=True)  # For Argon2 only
+
+    # Which DEK version this backup covers
+    dek_version = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True, onupdate=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index('ix_recovery_user', 'user_id'),
+        Index('ix_recovery_active', 'user_id', 'is_active'),
     )

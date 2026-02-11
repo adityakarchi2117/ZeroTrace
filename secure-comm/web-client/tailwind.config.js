@@ -7,6 +7,14 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        serif: ['var(--font-serif)', 'Playfair Display', 'Georgia', 'serif'],
+        cursive: ['var(--font-cursive)', 'Dancing Script', 'cursive'],
+        rounded: ['var(--font-rounded)', 'Nunito', 'sans-serif'],
+        code: ['var(--font-code)', 'JetBrains Mono', 'Fira Code', 'monospace'],
+      },
       colors: {
         cipher: {
           primary: '#6366f1',

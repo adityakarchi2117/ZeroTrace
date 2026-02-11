@@ -10,7 +10,8 @@ export interface WebSocketMessage {
   'call_end' | 'call_ended' | 'call_failed' | 'ice_candidate' |
   'presence_subscribe' | 'get_online_status' | 'online_status' |
   'delete_message' | 'delete_message_received' | 'delete_conversation' | 'delete_conversation_received' |
-  'contacts_sync' | 'notification' | 'friend_request' | 'friend_request_accepted' | 'friend_request_rejected';
+  'contacts_sync' | 'notification' | 'friend_request' | 'friend_request_accepted' | 'friend_request_rejected' |
+  'contact_removed_self' | 'read_sync' | 'read_state_sync';
   data?: any;
   timestamp: string;
   [key: string]: any;

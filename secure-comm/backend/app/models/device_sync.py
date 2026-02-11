@@ -208,3 +208,45 @@ class RevocationLogEntry(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ==================== Recovery Key Backup ====================
+
+class RecoveryBackupRequest(BaseModel):
+    """Create a password-derived recovery backup for the DEK."""
+    encrypted_dek: str = Field(..., description="DEK encrypted with password-derived key (base64)")
+    encryption_nonce: str = Field(..., description="Nonce used for encryption (base64)")
+    encryption_algorithm: str = Field(default="xsalsa20-poly1305")
+    kdf_salt: str = Field(..., description="Salt used for key derivation (base64)")
+    kdf_algorithm: str = Field(default="pbkdf2-sha256", description="pbkdf2-sha256 or argon2id")
+    kdf_iterations: int = Field(default=600000, description="PBKDF2 iterations")
+    kdf_memory: Optional[int] = Field(default=None, description="Argon2 memory cost (KB)")
+    kdf_parallelism: Optional[int] = Field(default=None, description="Argon2 parallelism")
+    dek_version: int = Field(..., description="Which DEK version this backup covers")
+
+
+class RecoveryBackupResponse(BaseModel):
+    """Recovery backup stored confirmation."""
+    id: int
+    dek_version: int
+    kdf_algorithm: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecoveryRestoreResponse(BaseModel):
+    """Data needed to restore DEK from recovery backup."""
+    encrypted_dek: str
+    encryption_nonce: str
+    encryption_algorithm: str
+    kdf_salt: str
+    kdf_algorithm: str
+    kdf_iterations: int
+    kdf_memory: Optional[int] = None
+    kdf_parallelism: Optional[int] = None
+    dek_version: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

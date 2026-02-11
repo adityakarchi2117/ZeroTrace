@@ -894,11 +894,12 @@ async def unfriend_user(
             detail=error
         )
     
-    # Send real-time notification
+    # Send real-time notification to the unfriended user + sync initiator's devices
     if current_user:
         await notify_contact_removed(
             user_id=unfriend_data.user_id,
-            removed_by_username=current_user.username
+            removed_by_username=current_user.username,
+            initiator_id=user_id
         )
     
     return {
