@@ -37,8 +37,8 @@ export interface Message {
   sender_theme?: {
     bubbleColor?: string;
     textColor?: string;
-    style?: 'rounded' | 'glass' | 'neon';
-    font?: 'inter' | 'mono';
+    style?: 'rounded' | 'glass' | 'neon' | 'minimal' | 'gradient' | 'retro' | 'elegant' | 'brutal';
+    font?: 'inter' | 'mono' | 'serif' | 'cursive' | 'rounded' | 'code';
     accentGradient?: string;
     accentPrimary?: string;
     accentSecondary?: string;
