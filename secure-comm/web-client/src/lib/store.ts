@@ -1875,8 +1875,8 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
       let wasUpdated = false;
 
       // Iterate through all conversations to find and update the message
-      for (const [username, conversationMessages] of updatedMessagesMap.entries()) {
-        const messageIndex = conversationMessages.findIndex(msg => msg.id === messageId);
+      for (const [username, conversationMessages] of Array.from(updatedMessagesMap.entries())) {
+        const messageIndex = conversationMessages.findIndex((msg: Message) => msg.id === messageId);
         if (messageIndex !== -1) {
           const updatedConversationMessages = [...conversationMessages];
           updatedConversationMessages[messageIndex] = {
