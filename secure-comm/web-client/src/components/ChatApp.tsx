@@ -13,6 +13,7 @@ import AddFriendPanel from './AddFriendPanel';
 import PendingRequestsPanel from './PendingRequestsPanel';
 import BlockedUsersPanel from './BlockedUsersPanel';
 import ProfilePage from './ProfilePage';
+import MagicBento from './MagicBento';
 import NotificationToast, { useNotificationToasts } from './NotificationToast';
 import { Lock, Menu, X, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
@@ -361,7 +362,7 @@ export default function ChatApp() {
 
 function EmptyState() {
   return (
-    <div className="text-center">
+    <div className="text-center w-full max-w-6xl px-4">
       <motion.div
         className="w-20 h-20 bg-gradient-to-br from-cipher-primary/20 to-cipher-secondary/20 rounded-full flex items-center justify-center mx-auto mb-6"
         initial={{ scale: 0, rotate: -180 }}
@@ -402,6 +403,27 @@ function EmptyState() {
       >
         <Lock className="w-4 h-4" />
         <span>All messages are encrypted on your device</span>
+      </motion.div>
+
+      <motion.div
+        className="mt-8"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+      >
+        <MagicBento
+          textAutoHide
+          enableStars
+          enableSpotlight
+          enableBorderGlow
+          enableTilt={false}
+          enableMagnetism={false}
+          clickEffect
+          spotlightRadius={400}
+          particleCount={12}
+          glowColor="132, 0, 255"
+          disableAnimations={false}
+        />
       </motion.div>
     </div>
   );

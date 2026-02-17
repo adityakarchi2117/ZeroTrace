@@ -94,7 +94,7 @@ async def update_profile(
     )
 
 
-@router.get("/profile/{target_id}", response_model=ProfileResponse)
+@router.get("/profile/{target_id:int}", response_model=ProfileResponse)
 async def get_profile(
     target_id: int,
     user_id: Optional[int] = Depends(get_current_user_id),

@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCall } from '@/contexts/CallProvider';
 import { DraggablePiP } from './DraggablePiP';
@@ -17,6 +18,8 @@ import {
   Monitor, Maximize2, Minimize2, PictureInPicture,
   RefreshCw, MoreVertical
 } from 'lucide-react';
+
+const ElectricBorder = dynamic(() => import('./ElectricBorder'), { ssr: false });
 
 export function EnhancedCallView() {
   const {
@@ -146,15 +149,26 @@ export function EnhancedCallView() {
         {(!remoteStream || remoteStream.getVideoTracks().length === 0) && showLocalInPiP && (
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-gray-900 to-black">
             <div className="text-center">
-              <div className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mx-auto mb-4">
-                <span className="text-5xl text-white font-bold">
-                  {callState.remoteUsername.charAt(0).toUpperCase()}
-                </span>
-              </div>
+              {/* Electric border around avatar during calling/connecting */}
+              <ElectricBorder
+                color={isRinging ? (isIncoming ? '#22c55e' : '#facc15') : '#5227FF'}
+                speed={isRinging ? 2 : 1.5}
+                chaos={isRinging ? 0.18 : 0.12}
+                borderRadius={9999}
+                thickness={3}
+                className="mx-auto mb-4"
+              >
+                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                  <span className="text-5xl text-white font-bold">
+                    {callState.remoteUsername.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              </ElectricBorder>
               <h2 className="text-white text-2xl font-bold">{callState.remoteUsername}</h2>
               <p className="text-gray-400 mt-2">
                 {callState.status === 'connecting' ? 'Connecting...' : 
                  callState.status === 'calling' ? 'Calling...' : 
+                 isRinging && isIncoming ? 'Incoming call...' :
                  formatDuration(callDuration)}
               </p>
             </div>
@@ -261,28 +275,45 @@ export function EnhancedCallView() {
               {/* Incoming Call Actions */}
               {isRinging && isIncoming ? (
                 <>
-                  <motion.button
-                    onClick={rejectCall}
-                    className="p-5 bg-red-500 hover:bg-red-600 rounded-full transition-all shadow-lg"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
+                  {/* Reject with red electric border */}
+                  <ElectricBorder
+                    color="#ef4444"
+                    speed={2}
+                    chaos={0.15}
+                    borderRadius={9999}
+                    thickness={2}
                   >
-                    <PhoneOff className="w-8 h-8 text-white" />
-                  </motion.button>
-                  <motion.button
-                    onClick={answerCall}
-                    className="p-5 bg-green-500 hover:bg-green-600 rounded-full transition-all shadow-lg"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    animate={{ scale: [1, 1.05, 1] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
+                    <motion.button
+                      onClick={rejectCall}
+                      className="p-5 bg-red-500 hover:bg-red-600 rounded-full transition-all shadow-lg"
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <PhoneOff className="w-8 h-8 text-white" />
+                    </motion.button>
+                  </ElectricBorder>
+                  
+                  {/* Answer with green electric border */}
+                  <ElectricBorder
+                    color="#22c55e"
+                    speed={2}
+                    chaos={0.15}
+                    borderRadius={9999}
+                    thickness={2}
                   >
-                    {isVideoCall ? (
-                      <Video className="w-8 h-8 text-white" />
-                    ) : (
-                      <Phone className="w-8 h-8 text-white" />
-                    )}
-                  </motion.button>
+                    <motion.button
+                      onClick={answerCall}
+                      className="p-5 bg-green-500 hover:bg-green-600 rounded-full transition-all shadow-lg"
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      {isVideoCall ? (
+                        <Video className="w-8 h-8 text-white" />
+                      ) : (
+                        <Phone className="w-8 h-8 text-white" />
+                      )}
+                    </motion.button>
+                  </ElectricBorder>
                 </>
               ) : (
                 <>

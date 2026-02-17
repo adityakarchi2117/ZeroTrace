@@ -8,17 +8,21 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { CallState } from '@/lib/webrtc';
 import { useAppearance } from '@/lib/useAppearance';
 import {
   Phone, PhoneOff, Mic, MicOff, Video, VideoOff,
   Monitor, Maximize2, Minimize2, Volume2, VolumeX,
-  PictureInPicture, SwitchCamera
+  SwitchCamera
 } from 'lucide-react';
+
+const ReflectiveCard = dynamic(() => import('./ReflectiveCard'), { ssr: false });
 
 interface CallViewProps {
   callState: CallState;
+  localUsername?: string;
   callDuration: number;
   isMuted: boolean;
   isVideoOff: boolean;
@@ -92,6 +96,7 @@ function useDraggable(initialPosition: { x: number; y: number }) {
 
 export function CallView({
   callState,
+  localUsername,
   callDuration,
   isMuted,
   isVideoOff,
@@ -195,7 +200,7 @@ export function CallView({
   const isRinging = callState.status === 'ringing';
   const isIncoming = callState.isIncoming;
   const hasRemoteVideo = remoteStream?.getVideoTracks().some(t => t.readyState === 'live');
-  const hasLocalVideo = localStream?.getVideoTracks().some(t => t.readyState === 'live');
+  const showReflectiveCard = !isVideoCall || callState.status !== 'connected' || !hasRemoteVideo;
 
   // Determine which stream goes where
   const mainStream = showLocalInPip ? remoteStream : localStream;
@@ -210,7 +215,7 @@ export function CallView({
 
       {/* Main Video (Full Screen) */}
       <div className="absolute inset-0">
-        {mainStream ? (
+        {mainStream && !showReflectiveCard ? (
           <video
             ref={mainVideoRef as React.RefObject<HTMLVideoElement>}
             autoPlay
@@ -220,13 +225,16 @@ export function CallView({
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-gray-900 to-black">
-            <div className="text-center">
-              <div className="w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: accentGradient }}>
-                <span className="text-5xl text-white font-bold">{callState.remoteUsername.charAt(0).toUpperCase()}</span>
-              </div>
-              <h2 className="text-white text-2xl font-bold">{callState.remoteUsername}</h2>
-              <p className="text-gray-400 mt-2">{callState.status === 'connecting' ? 'Connecting...' : callState.status === 'calling' ? 'Calling...' : formatDuration(callDuration)}</p>
-            </div>
+            <ReflectiveCard
+              remoteUsername={callState.remoteUsername}
+              localUsername={localUsername}
+              callType={callState.type}
+              status={callState.status as 'calling' | 'ringing' | 'connecting' | 'connected'}
+              isIncoming={callState.isIncoming}
+              stream={isVideoCall ? (remoteStream ?? localStream) : null}
+              color="#ffffff"
+              overlayColor="rgba(8, 8, 22, 0.35)"
+            />
           </div>
         )}
       </div>
@@ -317,10 +325,21 @@ export function CallView({
         <div className="flex items-center justify-center gap-4">
           {isRinging && isIncoming ? (
             <>
-              <motion.button onClick={onRejectCall} className="p-5 bg-red-500 rounded-full" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+              <motion.button 
+                onClick={onRejectCall} 
+                className="p-5 bg-red-500 rounded-full" 
+                whileHover={{ scale: 1.1 }} 
+                whileTap={{ scale: 0.95 }}
+              >
                 <PhoneOff className="w-8 h-8 text-white" />
               </motion.button>
-              <motion.button onClick={onAnswerCall} className="p-5 bg-green-500 rounded-full" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+              
+              <motion.button 
+                onClick={onAnswerCall} 
+                className="p-5 bg-green-500 rounded-full" 
+                whileHover={{ scale: 1.1 }} 
+                whileTap={{ scale: 0.95 }}
+              >
                 {isVideoCall ? <Video className="w-8 h-8 text-white" /> : <Phone className="w-8 h-8 text-white" />}
               </motion.button>
             </>

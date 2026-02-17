@@ -169,7 +169,7 @@ async def get_call_history(
     return message_service.get_call_history(user_id)
 
 
-@router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{message_id:int}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_message(
     message_id: int,
     token: str = Depends(oauth2_scheme),
@@ -204,7 +204,7 @@ async def delete_conversation(
     user_id = payload.get("user_id")
     message_service = MessageService(db)
     
-    message_service.delete_conversation(user_id, username)
+    message_service.delete_conversation(user_id, username, delete_for_everyone=True)
     message_service.delete_call_history(user_id, username)
     return None
 

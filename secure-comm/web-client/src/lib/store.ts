@@ -90,11 +90,11 @@ interface AppState extends AuthState, CryptoState, ChatState {
   removeAvatar: () => Promise<void>;
   reportUser: (username: string, reason: string, description?: string) => Promise<string>;
 
-  deleteMessageForMe: (messageId: number, conversationUsername: string) => Promise<void>;
-  deleteMessageForEveryone: (messageId: number, conversationUsername: string) => Promise<void>;
+  deleteMessageForMe: (messageId: number | string, conversationUsername: string) => Promise<void>;
+  deleteMessageForEveryone: (messageId: number | string, conversationUsername: string) => Promise<void>;
   clearChat: (username: string) => Promise<void>;
   deleteConversationForEveryone: (username: string) => Promise<void>;
-  handleRemoteDeleteMessage: (messageId: number, senderUsername: string) => void;
+  handleRemoteDeleteMessage: (messageId: number | string, senderUsername: string) => void;
   handleRemoteDeleteConversation: (senderUsername: string) => void;
 
   setUserOnline: (userId: number, isOnline: boolean) => void;
@@ -1103,31 +1103,39 @@ export const useStore = create<AppState>()(
 
       clearError: () => set({ error: null }),
 
-      deleteMessageForMe: async (messageId: number, conversationUsername: string) => {
+      deleteMessageForMe: async (messageId: number | string, conversationUsername: string) => {
 
         try {
 
           const currentMessages = new Map(get().messages);
           const convMessages = currentMessages.get(conversationUsername) || [];
-          const updatedMessages = convMessages.filter(m => m.id !== messageId);
+          const messageIdKey = String(messageId);
+          const normalizedMessageId = Number(messageId);
+
+          const updatedMessages = convMessages.filter(m => String(m.id) !== messageIdKey);
           currentMessages.set(conversationUsername, updatedMessages);
           set({ messages: currentMessages });
 
-          await localStorageManager.deleteMessage(messageId);
+          if (Number.isFinite(normalizedMessageId)) {
+            await localStorageManager.deleteMessage(normalizedMessageId);
+          }
           console.log('🗑️ Message deleted locally:', messageId);
         } catch (error) {
           console.error('Failed to delete message locally:', error);
         }
       },
 
-      deleteMessageForEveryone: async (messageId: number, conversationUsername: string) => {
+      deleteMessageForEveryone: async (messageId: number | string, conversationUsername: string) => {
 
         try {
 
           const currentMessages = new Map(get().messages);
           const convMessages = currentMessages.get(conversationUsername) || [];
+          const messageIdKey = String(messageId);
+          const normalizedMessageId = Number(messageId);
+
           const updatedMessages = convMessages.map(m => {
-            if (m.id === messageId) {
+            if (String(m.id) === messageIdKey) {
               return {
                 ...m,
                 _decryptedContent: null,
@@ -1140,14 +1148,22 @@ export const useStore = create<AppState>()(
           currentMessages.set(conversationUsername, updatedMessages);
           set({ messages: currentMessages });
 
-          await localStorageManager.markMessageAsDeleted(messageId);
+          if (Number.isFinite(normalizedMessageId)) {
+            await localStorageManager.markMessageAsDeleted(normalizedMessageId);
+          }
 
-          wsManager.sendDeleteMessage(messageId, conversationUsername);
+          if (Number.isFinite(normalizedMessageId)) {
+            wsManager.sendDeleteMessage(normalizedMessageId, conversationUsername);
+          } else {
+            console.warn('Skipping remote delete event: non-numeric message id', messageId);
+          }
 
-          try {
-            await api.deleteMessage(messageId);
-          } catch (e) {
-            console.warn('Could not delete message on server:', e);
+          if (Number.isFinite(normalizedMessageId)) {
+            try {
+              await api.deleteMessage(normalizedMessageId);
+            } catch (e) {
+              console.warn('Could not delete message on server:', e);
+            }
           }
 
           console.log('🗑️ Message deleted for everyone:', messageId);
@@ -1237,12 +1253,14 @@ export const useStore = create<AppState>()(
         }
       },
 
-      handleRemoteDeleteMessage: (messageId: number, senderUsername: string) => {
+      handleRemoteDeleteMessage: (messageId: number | string, senderUsername: string) => {
 
         const currentMessages = new Map(get().messages);
         const convMessages = currentMessages.get(senderUsername) || [];
+        const messageIdKey = String(messageId);
+
         const updatedMessages = convMessages.map(m => {
-          if (m.id === messageId) {
+          if (String(m.id) === messageIdKey) {
             return {
               ...m,
               _decryptedContent: null,
@@ -1255,8 +1273,11 @@ export const useStore = create<AppState>()(
         currentMessages.set(senderUsername, updatedMessages);
         set({ messages: currentMessages });
 
-        localStorageManager.markMessageAsDeleted(messageId).catch(console.error);
-        console.log('📨 Remote message deletion received:', messageId);
+        const normalizedMessageId = Number(messageId);
+        if (Number.isFinite(normalizedMessageId)) {
+          localStorageManager.markMessageAsDeleted(normalizedMessageId).catch(console.error);
+        }
+        console.log('Remote message deletion received:', messageId);
       },
 
       handleRemoteDeleteConversation: (senderUsername: string) => {
@@ -1901,3 +1922,5 @@ declare module './api' {
     _decryptedContent?: string | null;
   }
 }
+
+

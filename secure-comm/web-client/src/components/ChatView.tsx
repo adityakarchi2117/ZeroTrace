@@ -159,7 +159,7 @@ export default function ChatView() {
     visible: boolean;
     x: number;
     y: number;
-    messageId: number;
+    messageId: number | string;
     isMine: boolean;
   } | null>(null);
 
@@ -170,7 +170,7 @@ export default function ChatView() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     visible: boolean;
     type: 'message' | 'chat' | 'conversation';
-    messageId?: number;
+    messageId?: number | string;
     deleteForEveryone?: boolean;
   } | null>(null);
 
@@ -596,7 +596,7 @@ export default function ChatView() {
     return <p className="break-words">{content}</p>;
   };
 
-  const handleMessageContextMenu = (e: React.MouseEvent, messageId: number, isMine: boolean) => {
+  const handleMessageContextMenu = (e: React.MouseEvent, messageId: number | string, isMine: boolean) => {
     e.preventDefault();
     setContextMenu({
       visible: true,
@@ -614,16 +614,12 @@ export default function ChatView() {
   const handleDeleteMessage = async (forEveryone: boolean) => {
     if (!contextMenu || !currentConversation) return;
 
-    if (forEveryone) {
-      setDeleteConfirmation({
-        visible: true,
-        type: 'message',
-        messageId: contextMenu.messageId,
-        deleteForEveryone: true,
-      });
-    } else {
-      await deleteMessageForMe(contextMenu.messageId, currentConversation);
-    }
+    setDeleteConfirmation({
+      visible: true,
+      type: 'message',
+      messageId: contextMenu.messageId,
+      deleteForEveryone: forEveryone,
+    });
     setContextMenu(null);
   };
 
@@ -729,7 +725,7 @@ export default function ChatView() {
     if (!deleteConfirmation || !currentConversation) return;
 
     try {
-      if (deleteConfirmation.type === 'message' && deleteConfirmation.messageId) {
+      if (deleteConfirmation.type === 'message' && deleteConfirmation.messageId !== undefined) {
         if (deleteConfirmation.deleteForEveryone) {
           await deleteMessageForEveryone(deleteConfirmation.messageId, currentConversation);
         } else {
@@ -809,6 +805,7 @@ export default function ChatView() {
     return (
       <CallView
         callState={callState}
+        localUsername={user?.username}
         callDuration={callDuration}
         isMuted={isMuted}
         isVideoOff={isVideoOff}
@@ -1646,18 +1643,18 @@ export default function ChatView() {
               >
                 <button
                   onClick={() => handleDeleteMessage(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
+                  className="w-full flex items-center justify-start gap-3 px-4 py-2.5 text-sm leading-none text-gray-300 hover:bg-gray-700/50 transition-colors"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete for me</span>
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  <span className="leading-none">Delete for me</span>
                 </button>
                 {contextMenu.isMine && (
                   <button
                     onClick={() => handleDeleteMessage(true)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                    className="w-full flex items-center justify-start gap-3 px-4 py-2.5 text-sm leading-none text-red-400 hover:bg-red-500/10 transition-colors"
                   >
-                    <Trash2 className="w-4 h-4" />
-                    <span>Delete for everyone</span>
+                    <Trash2 className="w-4 h-4 shrink-0" />
+                    <span className="leading-none">Delete for everyone</span>
                   </button>
                 )}
               </motion.div>
@@ -1689,7 +1686,9 @@ export default function ChatView() {
                 </h3>
                 <p className="text-gray-400 text-sm mb-6">
                   {deleteConfirmation.type === 'message'
-                    ? 'This message will be deleted for everyone. This action cannot be undone.'
+                    ? (deleteConfirmation.deleteForEveryone
+                      ? 'This message will be deleted for everyone. This action cannot be undone.'
+                      : 'This message will be removed from your view only.')
                     : deleteConfirmation.type === 'chat'
                       ? 'This will clear all messages from your device. The other person will still have their copy.'
                       : 'This will delete the entire conversation for both you and the other person. This cannot be undone.'}
@@ -1714,7 +1713,7 @@ export default function ChatView() {
                     whileTap={{ scale: 0.95 }}
                   >
                     {deleteConfirmation.type === 'message'
-                      ? 'Delete'
+                      ? (deleteConfirmation.deleteForEveryone ? 'Delete for everyone' : 'Delete for me')
                       : deleteConfirmation.type === 'chat'
                         ? 'Clear'
                         : 'Delete for everyone'}

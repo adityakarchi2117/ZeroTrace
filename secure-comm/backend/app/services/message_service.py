@@ -187,25 +187,33 @@ class MessageService:
         self.db.commit()
         return True
     
-    def delete_conversation(self, user_id: int, peer_username: str) -> bool:
-        """Delete all messages in a conversation with a peer."""
+    def delete_conversation(self, user_id: int, peer_username: str, delete_for_everyone: bool = False) -> bool:
+        """Delete all messages in a conversation with a peer.
+
+        - delete_for_everyone=False: hide messages only for the requesting user.
+        - delete_for_everyone=True: remove messages for both participants.
+        """
         peer = self.user_repo.get_by_username(peer_username)
         if not peer:
             return False
         
-        # Soft delete messages for this user
+        # Fetch all messages between both users.
         messages = self.db.query(Message).filter(
             or_(
                 (Message.sender_id == user_id) & (Message.recipient_id == peer.id),
                 (Message.sender_id == peer.id) & (Message.recipient_id == user_id)
             )
         ).all()
-        
-        for message in messages:
-            if message.sender_id == user_id:
-                message.sender_deleted = True
-            if message.recipient_id == user_id:
-                message.recipient_deleted = True
+
+        if delete_for_everyone:
+            for message in messages:
+                self.db.delete(message)
+        else:
+            for message in messages:
+                if message.sender_id == user_id:
+                    message.sender_deleted = True
+                if message.recipient_id == user_id:
+                    message.recipient_deleted = True
         
         self.db.commit()
         return True

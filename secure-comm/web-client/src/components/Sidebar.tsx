@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useStore } from '@/lib/store';
 import { useAppearance } from '@/lib/useAppearance';
 import { MotionAvatar } from '@/components/motion';
@@ -12,6 +13,9 @@ import {
 import { getSoundEnabled, setSoundEnabled, loadSoundSettings } from '@/lib/sound';
 import { format, isToday, isYesterday } from 'date-fns';
 import { friendApi } from '@/lib/friendApi';
+
+const IconWithBlur = dynamic(() => import('./IconWithBlur'), { ssr: false });
+const CircularText = dynamic(() => import('./CircularText'), { ssr: false });
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -346,13 +350,12 @@ export default function Sidebar({
         {/* Header Row */}
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} mb-3`}>
           <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: accentGradient }}
-            >
-              <Lock className="w-4 h-4 text-white" />
-            </div>
-            {!collapsed && <span className="font-bold text-white dark:text-white">ZeroTrace</span>}
+            <CircularText
+              text="ZERO·TRACE·"
+              onHover="speedUp"
+              spinDuration={20}
+              className={`${collapsed ? 'w-[36px] h-[36px] text-[8px]' : 'w-[44px] h-[44px] text-[9px]'}`}
+            />
           </div>
           {!collapsed && (
             <div className="flex items-center gap-1">
@@ -390,20 +393,24 @@ export default function Sidebar({
         <div className={`${collapsed ? 'flex flex-col gap-2' : 'flex items-center justify-between'} bg-gray-800/30 rounded-lg p-1 mb-3`}>
           <button
             onClick={onAddFriend}
-            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-green-400 transition-colors`}
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg transition-colors group`}
             title="Add Friend"
           >
-            <UserPlus className="w-4 h-4" />
-            {!collapsed && <span className="text-[10px]">Add</span>}
+            <IconWithBlur size="sm" iconClassName="text-gray-400 group-hover:text-green-400">
+              <UserPlus className="w-4 h-4" />
+            </IconWithBlur>
+            {!collapsed && <span className="text-[10px] text-gray-400 group-hover:text-green-400">Add</span>}
           </button>
 
           <button
             onClick={onPendingRequests}
-            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-yellow-400 transition-colors relative`}
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg transition-colors relative group`}
             title="Pending Requests"
           >
             <div className="relative">
-              <Users className="w-4 h-4" />
+              <IconWithBlur size="sm" iconClassName="text-gray-400 group-hover:text-yellow-400">
+                <Users className="w-4 h-4" />
+              </IconWithBlur>
               {pendingRequestCount > 0 && (
                 <span
                   className={`absolute -top-2 -right-2 w-4 h-4 bg-yellow-500 text-black text-[9px] rounded-full flex items-center justify-center font-bold ${collapsed ? 'w-3 h-3 text-[8px]' : ''}`}
@@ -412,38 +419,44 @@ export default function Sidebar({
                 </span>
               )}
             </div>
-            {!collapsed && <span className="text-[10px]">Requests</span>}
+            {!collapsed && <span className="text-[10px] text-gray-400 group-hover:text-yellow-400">Requests</span>}
           </button>
 
           {!collapsed && onBlockedUsers && (
             <button
               onClick={onBlockedUsers}
-              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
+              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg transition-colors group"
               title="Blocked Users"
             >
-              <ShieldBan className="w-4 h-4" />
-              <span className="text-[10px]">Blocked</span>
+              <IconWithBlur size="sm" iconClassName="text-gray-400 group-hover:text-red-400">
+                <ShieldBan className="w-4 h-4" />
+              </IconWithBlur>
+              <span className="text-[10px] text-gray-400 group-hover:text-red-400">Blocked</span>
             </button>
           )}
 
           <button
             onClick={onNewChat}
-            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-cyan-400 transition-colors`}
+            className={`${collapsed ? 'p-3' : 'flex-1 p-2'} flex flex-col items-center gap-1 hover:bg-gray-700 rounded-lg transition-colors group`}
             title="New Chat"
           >
-            <Plus className="w-4 h-4" />
-            {!collapsed && <span className="text-[10px]">New</span>}
+            <IconWithBlur size="sm" iconClassName="text-gray-400 group-hover:text-cyan-400">
+              <Plus className="w-4 h-4" />
+            </IconWithBlur>
+            {!collapsed && <span className="text-[10px] text-gray-400 group-hover:text-cyan-400">New</span>}
           </button>
 
           {!collapsed && (
             <button
               onClick={refreshContacts}
               disabled={isRefreshingContacts}
-              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
+              className="flex-1 flex flex-col items-center gap-1 p-2 hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 group"
               title="Refresh"
             >
-              <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
-              <span className="text-[10px]">Refresh</span>
+              <IconWithBlur size="sm" iconClassName="text-gray-400 group-hover:text-blue-400">
+                <RefreshCw className={`w-4 h-4 ${isRefreshingContacts ? 'animate-spin' : ''}`} />
+              </IconWithBlur>
+              <span className="text-[10px] text-gray-400 group-hover:text-blue-400">Refresh</span>
             </button>
           )}
         </div>

@@ -1,8 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useStore } from '@/lib/store';
 import { Lock, Mail, User, Eye, EyeOff, Shield, Key, MessageSquare } from 'lucide-react';
+
+const Aurora = dynamic(() => import('./Aurora'), { ssr: false });
+const IconWithBlur = dynamic(() => import('./IconWithBlur'), { ssr: false });
+const SpotlightCard = dynamic(() => import('./SpotlightCard'), { ssr: false });
+const CircularText = dynamic(() => import('./CircularText'), { ssr: false });
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,13 +16,13 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const { login, register, isLoading, error, clearError } = useStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
-    
+
     try {
       if (isLogin) {
         await login(username, password);
@@ -35,40 +41,54 @@ export default function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-cipher-darker flex">
+    <div className="min-h-screen bg-cipher-darker flex relative overflow-hidden">
+      {/* Aurora Background */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
+        <Aurora
+          colorStops={["#ba66ff", "#B19EEF", "#5227FF"]}
+          blend={0.5}
+          amplitude={1.0}
+          speed={1}
+        />
+      </div>
+      <div className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-r from-cipher-dark/75 via-cipher-dark/40 to-cipher-darker/70" />
+
+      {/* Top-Left Circular Branding */}
+      <div className="absolute top-6 left-6 z-20 lg:top-8 lg:left-10">
+        <CircularText
+          text="ZERO·TRACE·SECURE·"
+          onHover="speedUp"
+          spinDuration={16}
+          className="w-[120px] h-[120px] text-[14px] lg:w-[160px] lg:h-[160px] lg:text-[17px] drop-shadow-[0_0_24px_rgba(82,39,255,0.35)]"
+        />
+      </div>
+
       {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-cipher-dark to-cipher-darker p-12 flex-col justify-between">
+      <div className="hidden lg:flex lg:w-1/2 p-12 pt-52 flex-col justify-between relative z-10">
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-gradient-to-br from-cipher-primary to-cipher-secondary rounded-xl flex items-center justify-center">
-              <Lock className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold gradient-text">ZeroTrace</span>
-          </div>
-          
           <h1 className="text-4xl font-bold text-white mb-4">
             Private by design.<br />
             <span className="text-cipher-primary">Secure by default.</span>
           </h1>
-          
+
           <p className="text-gray-400 text-lg mb-12">
-            End-to-end encrypted communication where only you and your recipient can read messages. 
+            End-to-end encrypted communication where only you and your recipient can read messages.
             The server never sees your data.
           </p>
 
           {/* Features */}
-          <div className="space-y-6">
-            <Feature 
+          <div className="space-y-4">
+            <Feature
               icon={<Shield className="w-5 h-5" />}
               title="Zero-Knowledge Server"
               description="We can't read your messages. Ever."
             />
-            <Feature 
+            <Feature
               icon={<Key className="w-5 h-5" />}
               title="Cryptographic Identity"
               description="Your identity is based on math, not trust."
             />
-            <Feature 
+            <Feature
               icon={<MessageSquare className="w-5 h-5" />}
               title="Ephemeral Messages"
               description="Messages that disappear after being read."
@@ -83,23 +103,19 @@ export default function AuthScreen() {
       </div>
 
       {/* Right Panel - Auth Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 pt-40 lg:pt-8 relative z-10">
         <div className="w-full max-w-md">
-          {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 bg-gradient-to-br from-cipher-primary to-cipher-secondary rounded-xl flex items-center justify-center">
-              <Lock className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold gradient-text">ZeroTrace</span>
-          </div>
 
-          <div className="glass rounded-2xl p-8">
+          <SpotlightCard
+            className="rounded-2xl border border-gray-700/50 bg-cipher-dark/80 backdrop-blur-xl p-8"
+            spotlightColor="rgba(82, 39, 255, 0.2)"
+          >
             <h2 className="text-2xl font-bold text-white mb-2">
-              {isLogin ? 'Welcome back' : 'Create account'}
+              {isLogin ? 'Welcome ' : 'Create account'}
             </h2>
             <p className="text-gray-400 mb-6">
-              {isLogin 
-                ? 'Enter your credentials to access your encrypted messages' 
+              {isLogin
+                ? 'Enter your credentials to access your encrypted messages'
                 : 'Generate your cryptographic identity'}
             </p>
 
@@ -196,16 +212,21 @@ export default function AuthScreen() {
                 </button>
               </p>
             </div>
-          </div>
+          </SpotlightCard>
 
           {/* Security Note */}
-          <div className="mt-6 flex items-start gap-3 text-sm text-gray-500">
-            <Shield className="w-5 h-5 flex-shrink-0 text-cipher-primary" />
-            <p>
-              Your private keys are generated locally and never leave your device. 
-              We use end-to-end encryption so only you can read your messages.
-            </p>
-          </div>
+          <SpotlightCard
+            className="mt-6 rounded-xl border border-gray-700/30 bg-cipher-dark/30 backdrop-blur-sm p-4"
+            spotlightColor="rgba(82, 39, 255, 0.15)"
+          >
+            <div className="flex items-start gap-3 text-sm text-gray-400">
+              <Shield className="w-5 h-5 flex-shrink-0 text-cipher-primary" />
+              <p>
+                Your private keys are generated locally and never leave your device.
+                We use end-to-end encryption so only you can read your messages.
+              </p>
+            </div>
+          </SpotlightCard>
         </div>
       </div>
     </div>
@@ -214,14 +235,27 @@ export default function AuthScreen() {
 
 function Feature({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
   return (
-    <div className="flex items-start gap-4">
-      <div className="w-10 h-10 bg-cipher-primary/20 rounded-lg flex items-center justify-center text-cipher-primary flex-shrink-0">
-        {icon}
+    <SpotlightCard
+      className="rounded-xl border border-gray-700/30 bg-cipher-dark/50 backdrop-blur-sm p-4"
+      spotlightColor="rgba(0, 224, 184, 0.15)"
+    >
+      <div className="flex items-start gap-4">
+        <IconWithBlur
+          variation={0}
+          shapeSize={1}
+          roundness={0.5}
+          borderSize={0.05}
+          circleSize={0.25}
+          circleEdge={1}
+          size="md"
+        >
+          {icon}
+        </IconWithBlur>
+        <div>
+          <h3 className="text-white font-medium">{title}</h3>
+          <p className="text-gray-400 text-sm">{description}</p>
+        </div>
       </div>
-      <div>
-        <h3 className="text-white font-medium">{title}</h3>
-        <p className="text-gray-400 text-sm">{description}</p>
-      </div>
-    </div>
+    </SpotlightCard>
   );
 }

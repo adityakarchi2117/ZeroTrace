@@ -130,6 +130,11 @@ export function useWebRTC(): UseWebRTCReturn {
   
   const endCall = useCallback(() => {
     webrtcService.endCall();
+    // Also clear local state in case the service's currentCall was already null
+    // (e.g., after a failed/rejected call where cleanup already ran)
+    setCallState(null);
+    setLocalStream(null);
+    setRemoteStream(null);
   }, []);
   
   const toggleMute = useCallback((): boolean => {

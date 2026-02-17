@@ -458,15 +458,15 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-cipher-dark border border-gray-700/60 rounded-2xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden shadow-2xl">
+        <div className="flex items-center justify-between p-6 border-b border-gray-700/60">
+          <h2 className="text-xl font-semibold text-white">
             Settings
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className="text-gray-400 hover:text-white transition-colors"
           >
             <X className="w-6 h-6" />
           </button>
@@ -474,7 +474,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         <div className="flex">
           {/* Sidebar */}
-          <div className="w-64 bg-gray-50 dark:bg-gray-900 p-4">
+          <div className="w-64 bg-cipher-darker/70 border-r border-gray-700/50 p-4">
             <nav className="space-y-2">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
@@ -483,9 +483,10 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === tab.id
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                      ? 'text-white'
+                      : 'text-gray-300 hover:bg-cipher-light/60'
                       }`}
+                    style={activeTab === tab.id ? { background: getAccentGradient() } : undefined}
                   >
                     <Icon className="w-5 h-5" />
                     <span>{tab.label}</span>
