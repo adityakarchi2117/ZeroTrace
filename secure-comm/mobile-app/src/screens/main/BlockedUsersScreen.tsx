@@ -129,7 +129,7 @@ export default function BlockedUsersScreen({ navigation }: BlockedUsersScreenPro
         disabled={actionUserId === item.blocked_user_id}
       >
         {actionUserId === item.blocked_user_id ? (
-          <ActivityIndicator size="small" color={colors.primary} />
+          <ActivityIndicator size="small" color={colors.primary.main} />
         ) : (
           <Text style={styles.unblockText}>Unblock</Text>
         )}
@@ -160,7 +160,7 @@ export default function BlockedUsersScreen({ navigation }: BlockedUsersScreenPro
       {/* Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={colors.primary.main} />
         </View>
       ) : (
         <FlatList
@@ -175,7 +175,7 @@ export default function BlockedUsersScreen({ navigation }: BlockedUsersScreenPro
                 setIsRefreshing(true);
                 loadBlockedUsers(false);
               }}
-              tintColor={colors.primary}
+              tintColor={colors.primary.main}
             />
           }
           ListEmptyComponent={
@@ -196,38 +196,38 @@ export default function BlockedUsersScreen({ navigation }: BlockedUsersScreenPro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border.primary,
   },
   backButton: {
     marginRight: 16,
   },
   backText: {
-    color: colors.primary,
+    color: colors.primary.main,
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
   },
   infoBanner: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     padding: 12,
     margin: 16,
     marginBottom: 0,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.border.primary,
   },
   infoText: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 13,
     textAlign: 'center',
   },
@@ -244,12 +244,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.border.primary,
   },
   userInfo: {
     flexDirection: 'row',
@@ -274,24 +274,24 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   username: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: '600',
   },
   blockedDate: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 12,
     marginTop: 2,
   },
   reason: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 11,
     marginTop: 2,
     fontStyle: 'italic',
   },
   unblockButton: {
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.primary.main,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   unblockText: {
-    color: colors.primary,
+    color: colors.primary.main,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -314,13 +314,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyText: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
   },
   emptySubtext: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 14,
   },
 });
+

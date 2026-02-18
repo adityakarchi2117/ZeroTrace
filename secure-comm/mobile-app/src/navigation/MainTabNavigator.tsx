@@ -3,6 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 import ChatsScreen from '../screens/main/ChatsScreen';
+import CallHistoryScreen from '../screens/main/CallHistoryScreen';
 import ContactsScreen from '../screens/main/ContactsScreen';
 import VaultScreen from '../screens/main/VaultScreen';
 import SettingsScreen from '../screens/main/SettingsScreen';
@@ -11,6 +12,7 @@ import { colors } from '../theme/colors';
 
 export type MainTabParamList = {
   Chats: undefined;
+  Calls: undefined;
   Contacts: undefined;
   Vault: undefined;
   Settings: undefined;
@@ -29,6 +31,9 @@ const MainTabNavigator: React.FC = () => {
           switch (route.name) {
             case 'Chats':
               iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
+              break;
+            case 'Calls':
+              iconName = focused ? 'call' : 'call-outline';
               break;
             case 'Contacts':
               iconName = focused ? 'people' : 'people-outline';
@@ -56,18 +61,19 @@ const MainTabNavigator: React.FC = () => {
           height: 60,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '500',
         },
       })}
     >
-      <Tab.Screen 
-        name="Chats" 
+      <Tab.Screen
+        name="Chats"
         component={ChatsScreen}
         options={{
           tabBarBadge: undefined, // TODO: Add unread count
         }}
       />
+      <Tab.Screen name="Calls" component={CallHistoryScreen} />
       <Tab.Screen name="Contacts" component={ContactsScreen} />
       <Tab.Screen name="Vault" component={VaultScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />

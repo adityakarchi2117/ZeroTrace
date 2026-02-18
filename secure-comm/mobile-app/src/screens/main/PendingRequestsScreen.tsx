@@ -40,7 +40,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [actionId, setActionId] = useState<number | null>(null);
-  
+
   // Verification modal state
   const [verifyModal, setVerifyModal] = useState<{
     visible: boolean;
@@ -51,8 +51,9 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
   const loadRequests = useCallback(async (showLoader = true) => {
     if (showLoader) setIsLoading(true);
     try {
-      const response = await friendAPI.getPendingRequests(activeTab);
-      setRequests(response.data);
+      const response = await friendAPI.getPendingRequests();
+      const data = response.data;
+      setRequests(activeTab === 'incoming' ? (data.incoming || []) : (data.outgoing || []));
     } catch (error) {
       showMessage({
         message: 'Load Failed',
@@ -71,7 +72,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
 
   // Accept request
   const handleAccept = async (request: FriendRequest) => {
-    if (!user?.public_key) {
+    if (!user?.public_key && !user?.publicKey) {
       showMessage({
         message: 'Keys Required',
         description: 'Please set up your encryption keys first',
@@ -87,16 +88,18 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
   // Complete acceptance after verification
   const completeAccept = async () => {
     const request = verifyModal.request;
-    if (!request || !user?.public_key) return;
+    if (!request || (!user?.public_key && !user?.publicKey)) return;
 
     setVerifyModal({ visible: false, request: null });
-    setActionId(request.request_id);
+    setActionId(request.id);
 
     try {
-      const fingerprint = computeKeyFingerprint(user.public_key);
-      
-      await friendAPI.acceptFriendRequest(request.request_id, {
+      const fingerprint = computeKeyFingerprint(user.public_key || user.publicKey || '');
+
+      await friendAPI.acceptFriendRequest({
+        request_id: request.id,
         receiver_public_key_fingerprint: fingerprint,
+        verify_sender_fingerprint: request.sender_public_key_fingerprint || '',
       });
 
       showMessage({
@@ -106,7 +109,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
       });
 
       // Remove from list
-      setRequests(prev => prev.filter(r => r.request_id !== request.request_id));
+      setRequests(prev => prev.filter(r => r.id !== request.id));
     } catch (error: any) {
       showMessage({
         message: 'Accept Failed',
@@ -135,16 +138,16 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
   };
 
   const confirmReject = async (request: FriendRequest) => {
-    setActionId(request.request_id);
+    setActionId(request.id);
     try {
-      await friendAPI.rejectFriendRequest(request.request_id);
+      await friendAPI.rejectFriendRequest({ request_id: request.id });
 
       showMessage({
         message: 'Request Rejected',
         type: 'info',
       });
 
-      setRequests(prev => prev.filter(r => r.request_id !== request.request_id));
+      setRequests(prev => prev.filter(r => r.id !== request.id));
     } catch (error: any) {
       showMessage({
         message: 'Reject Failed',
@@ -173,16 +176,16 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
   };
 
   const confirmCancel = async (request: FriendRequest) => {
-    setActionId(request.request_id);
+    setActionId(request.id);
     try {
-      await friendAPI.cancelFriendRequest(request.request_id);
+      await friendAPI.cancelFriendRequest(request.id);
 
       showMessage({
         message: 'Request Cancelled',
         type: 'info',
       });
 
-      setRequests(prev => prev.filter(r => r.request_id !== request.request_id));
+      setRequests(prev => prev.filter(r => r.id !== request.id));
     } catch (error: any) {
       showMessage({
         message: 'Cancel Failed',
@@ -199,12 +202,12 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
     const now = new Date();
     const expires = new Date(expiresAt);
     const diffMs = expires.getTime() - now.getTime();
-    
+
     if (diffMs <= 0) return 'Expired';
-    
+
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const days = Math.floor(hours / 24);
-    
+
     if (days > 0) return `${days}d remaining`;
     return `${hours}h remaining`;
   };
@@ -246,9 +249,9 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
               <TouchableOpacity
                 style={styles.acceptButton}
                 onPress={() => handleAccept(item)}
-                disabled={actionId === item.request_id}
+                disabled={actionId === item.id}
               >
-                {actionId === item.request_id ? (
+                {actionId === item.id ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={styles.acceptButtonText}>Accept</Text>
@@ -257,7 +260,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
               <TouchableOpacity
                 style={styles.rejectButton}
                 onPress={() => handleReject(item)}
-                disabled={actionId === item.request_id}
+                disabled={actionId === item.id}
               >
                 <Text style={styles.rejectButtonText}>Reject</Text>
               </TouchableOpacity>
@@ -266,9 +269,9 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => handleCancel(item)}
-              disabled={actionId === item.request_id}
+              disabled={actionId === item.id}
             >
-              {actionId === item.request_id ? (
+              {actionId === item.id ? (
                 <ActivityIndicator size="small" color="#ef4444" />
               ) : (
                 <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -326,13 +329,13 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
       {/* Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={colors.primary.main} />
         </View>
       ) : (
         <FlatList
           data={requests}
           renderItem={renderItem}
-          keyExtractor={(item) => item.request_id.toString()}
+          keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl
@@ -341,7 +344,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
                 setIsRefreshing(true);
                 loadRequests(false);
               }}
-              tintColor={colors.primary}
+              tintColor={colors.primary.main}
             />
           }
           ListEmptyComponent={
@@ -365,7 +368,7 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>🔐 Verify Identity</Text>
-            
+
             <Text style={styles.modalSubtitle}>
               Verify {verifyModal.request?.sender_username}'s key fingerprint:
             </Text>
@@ -411,31 +414,31 @@ export default function PendingRequestsScreen({ navigation }: PendingRequestsScr
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border.primary,
   },
   backButton: {
     marginRight: 16,
   },
   backText: {
-    color: colors.primary,
+    color: colors.primary.main,
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
   },
   tabs: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border.primary,
   },
   tab: {
     flex: 1,
@@ -444,15 +447,15 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderBottomColor: colors.primary,
+    borderBottomColor: colors.primary.main,
   },
   tabText: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 16,
     fontWeight: '500',
   },
   activeTabText: {
-    color: colors.primary,
+    color: colors.primary.main,
   },
   loadingContainer: {
     flex: 1,
@@ -464,12 +467,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   requestItem: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.border.primary,
   },
   requestInfo: {
     flexDirection: 'row',
@@ -479,7 +482,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary.main,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -493,24 +496,24 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   username: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: '600',
   },
   fingerprint: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 10,
     fontFamily: 'monospace',
     marginTop: 2,
   },
   message: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 13,
     fontStyle: 'italic',
     marginTop: 4,
   },
   timeRemaining: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 11,
     marginTop: 4,
   },
@@ -520,7 +523,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   acceptButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary.main,
     borderRadius: 8,
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -566,7 +569,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyText: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 16,
   },
   // Modal styles
@@ -578,7 +581,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalContent: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 16,
     padding: 24,
     width: '100%',
@@ -587,28 +590,28 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 8,
   },
   modalSubtitle: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 16,
   },
   fingerprintBox: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
   },
   fingerprintLabel: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 12,
     marginBottom: 8,
   },
   fingerprintValue: {
-    color: colors.text,
+    color: colors.text.primary,
     fontFamily: 'monospace',
     fontSize: 12,
     lineHeight: 20,
@@ -633,10 +636,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.border.primary,
   },
   modalCancelText: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontWeight: '600',
   },
   modalConfirmButton: {
@@ -644,10 +647,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     borderRadius: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary.main,
   },
   modalConfirmText: {
     color: '#fff',
     fontWeight: '600',
   },
 });
+

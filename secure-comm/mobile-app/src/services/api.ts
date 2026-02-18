@@ -1,5 +1,8 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axiosBrowser from 'axios/dist/browser/axios.cjs';
+import type { AxiosInstance, AxiosResponse, AxiosStatic } from 'axios';
 import { showMessage } from 'react-native-flash-message';
+
+const axios = axiosBrowser as unknown as AxiosStatic;
 
 // API Configuration
 const API_BASE_URL = __DEV__
@@ -172,6 +175,43 @@ export const vaultAPI = {
 
   syncItems: (lastSyncToken?: string) =>
     apiClient.post('/vault/sync', { last_sync_token: lastSyncToken }),
+};
+
+export const accountAPI = {
+  getAccountStatus: () =>
+    apiClient.get('/auth/me/account-status'),
+
+  changeUsername: (newUsername: string, password: string) =>
+    apiClient.post('/auth/me/change-username', {
+      new_username: newUsername,
+      password: password,
+    }),
+
+  disableAccount: (password: string) =>
+    apiClient.post('/auth/me/disable', { password }),
+
+  deleteAccount: (password: string) =>
+    apiClient.delete('/auth/me', { data: { password } }),
+
+  reactivateAccount: (username: string, password: string) => {
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+    return apiClient.post('/auth/reactivate', formData, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+  },
+};
+
+export const sessionsAPI = {
+  getSessions: () =>
+    apiClient.get('/sessions'),
+
+  revokeSession: (sessionId: number) =>
+    apiClient.delete(`/sessions/${sessionId}`),
+
+  revokeAllSessions: () =>
+    apiClient.post('/sessions/revoke-all'),
 };
 
 // WebSocket URL

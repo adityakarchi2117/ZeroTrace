@@ -16,9 +16,7 @@ import {
   Linking,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
 
 import { colors } from '../../theme/colors';
 import { Glassmorphism, GlassCard } from '../../components/motion/Glassmorphism';
@@ -33,10 +31,9 @@ type RootStackParamList = {
 };
 
 type ProfileScreenRouteProp = RouteProp<RootStackParamList, 'Profile'>;
-type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Profile'>;
 
 const ProfileScreen: React.FC = () => {
-  const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const navigation = useNavigation<any>();
   const route = useRoute<ProfileScreenRouteProp>();
   const { user: currentUser } = useAuthStore();
   
@@ -158,12 +155,7 @@ const ProfileScreen: React.FC = () => {
           {profile.banner_url ? (
             <Image source={{ uri: profile.banner_url }} style={styles.banner} />
           ) : (
-            <LinearGradient
-              colors={[colors.primary.main, colors.secondary.main]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.banner}
-            />
+            <View style={styles.bannerFallback} />
           )}
         </View>
 
@@ -173,7 +165,7 @@ const ProfileScreen: React.FC = () => {
             source={
               profile.avatar_url
                 ? { uri: profile.avatar_url }
-                : require('../../assets/default-avatar.png')
+                : undefined
             }
             size={120}
             style={styles.avatar}
@@ -361,6 +353,11 @@ const styles = StyleSheet.create({
   banner: {
     width: '100%',
     height: '100%',
+  },
+  bannerFallback: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: colors.primary.main,
   },
   headerSection: {
     alignItems: 'center',

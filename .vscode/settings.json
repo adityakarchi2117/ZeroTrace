@@ -1,5 +1,10 @@
 {
     "git.ignoreLimitWarning": true,
     "java.compile.nullAnalysis.mode": "automatic",
-    "java.configuration.updateBuildConfiguration": "disabled"
+    "java.configuration.updateBuildConfiguration": "disabled",
+    "java.import.exclusions": [
+        "**/node_modules/**",
+        "**/.gradle/**",
+        "**/build/**"
+    ]
 }

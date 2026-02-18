@@ -181,7 +181,7 @@ const EditProfileScreen: React.FC = () => {
             source={
               avatarUri
                 ? { uri: avatarUri }
-                : require('../../assets/default-avatar.png')
+                : undefined
             }
             size={100}
           />

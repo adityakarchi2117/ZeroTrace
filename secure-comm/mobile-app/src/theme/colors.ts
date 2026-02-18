@@ -19,6 +19,7 @@ export const colors = {
     secondary: '#1E293B',  // slate-800
     tertiary: '#334155',   // slate-700
     card: '#1E293B',
+    glass: 'rgba(148, 163, 184, 0.35)',
     modal: 'rgba(0, 0, 0, 0.8)',
   },
   
@@ -27,6 +28,7 @@ export const colors = {
     primary: '#F8FAFC',    // slate-50
     secondary: '#CBD5E1',  // slate-300
     muted: '#64748B',      // slate-500
+    disabled: '#94A3B8',   // slate-400
     inverse: '#0F172A',    // slate-900
   },
   

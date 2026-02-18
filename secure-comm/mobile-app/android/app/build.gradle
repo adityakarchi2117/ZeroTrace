@@ -73,13 +73,13 @@ android {
 
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "com.cipherlink"
+    namespace "com.repairapp"
     
     buildFeatures {
         buildConfig true
     }
     defaultConfig {
-        applicationId "com.cipherlink"
+        applicationId "com.repairapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

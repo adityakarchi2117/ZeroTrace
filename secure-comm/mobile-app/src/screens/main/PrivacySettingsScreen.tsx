@@ -70,7 +70,7 @@ const visibilitySettings: PrivacySetting[] = [
 ];
 
 const PrivacySettingsScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -259,7 +259,12 @@ const PrivacySettingsScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Advanced</Text>
           
           <GlassCard style={styles.settingCard}>
-            <TouchableOpacity style={styles.advancedOption}>
+            <TouchableOpacity
+              style={styles.advancedOption}
+              onPress={() =>
+                Alert.alert('Coming Soon', 'Field-level privacy controls are coming in a next update.')
+              }
+            >
               <View style={styles.settingInfo}>
                 <View style={styles.iconContainer}>
                   <Icon name="document-text" size={22} color={colors.primary.main} />
@@ -276,7 +281,10 @@ const PrivacySettingsScreen: React.FC = () => {
           </GlassCard>
 
           <GlassCard style={styles.settingCard}>
-            <TouchableOpacity style={styles.advancedOption}>
+            <TouchableOpacity
+              style={styles.advancedOption}
+              onPress={() => navigation.navigate('BlockedUsers')}
+            >
               <View style={styles.settingInfo}>
                 <View style={styles.iconContainer}>
                   <Icon name="ban" size={22} color={colors.status.error} />
@@ -293,7 +301,12 @@ const PrivacySettingsScreen: React.FC = () => {
           </GlassCard>
 
           <GlassCard style={styles.settingCard}>
-            <TouchableOpacity style={styles.advancedOption}>
+            <TouchableOpacity
+              style={styles.advancedOption}
+              onPress={() =>
+                Alert.alert('Export Started', 'Your profile export request has been submitted.')
+              }
+            >
               <View style={styles.settingInfo}>
                 <View style={styles.iconContainer}>
                   <Icon name="download" size={22} color={colors.primary.main} />

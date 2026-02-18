@@ -12,6 +12,10 @@ interface User {
   email: string;
   publicKey: string;
   identityKey: string;
+  // Snake-case aliases (backend field names used by some screens)
+  public_key?: string;
+  identity_key?: string;
+  user_id?: number;
 }
 
 interface AuthState {
@@ -20,7 +24,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   isFirstLaunch: boolean;
-  
+
   // Actions
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
@@ -46,7 +50,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: async (username: string, password: string) => {
     set({ isLoading: true });
-    
+
     try {
       const response = await apiClient.post('/auth/login', {
         username,
@@ -83,21 +87,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
     } catch (error: any) {
       set({ isLoading: false });
-      
+
       const message = error.response?.data?.detail || 'Login failed';
       showMessage({
         message: 'Login Failed',
         description: message,
         type: 'danger',
       });
-      
+
       throw error;
     }
   },
 
   register: async (username: string, email: string, password: string) => {
     set({ isLoading: true });
-    
+
     try {
       // Generate cryptographic keys
       const keyPair = generateKeyPair();
@@ -120,7 +124,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         username,
         keyPair.privateKey
       );
-      
+
       await Keychain.setInternetCredentials(
         STORAGE_KEYS.IDENTITY_PRIVATE_KEY,
         username,
@@ -133,7 +137,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         username,
         access_token
       );
-      
+
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
       await AsyncStorage.setItem(STORAGE_KEYS.TOKEN, access_token);
 
@@ -154,14 +158,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
     } catch (error: any) {
       set({ isLoading: false });
-      
+
       const message = error.response?.data?.detail || 'Registration failed';
       showMessage({
         message: 'Registration Failed',
         description: message,
         type: 'danger',
       });
-      
+
       throw error;
     }
   },
@@ -172,7 +176,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await Keychain.resetInternetCredentials('cipherlink_token');
       await Keychain.resetInternetCredentials(STORAGE_KEYS.PRIVATE_KEY);
       await Keychain.resetInternetCredentials(STORAGE_KEYS.IDENTITY_PRIVATE_KEY);
-      
+
       // Clear async storage
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.USER,
@@ -211,10 +215,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Try to restore authentication
       const credentials = await Keychain.getInternetCredentials('cipherlink_token');
-      
+
       if (credentials && credentials.password) {
         const userJson = await AsyncStorage.getItem(STORAGE_KEYS.USER);
-        
+
         if (userJson) {
           const user = JSON.parse(userJson);
           const token = credentials.password;

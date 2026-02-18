@@ -1,20 +1,20 @@
 /**
  * QR Scanner Screen
- * Scan QR codes to add contacts securely
+ * Scan and share contact QR codes
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
   Dimensions,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
   Alert,
-  Platform,
 } from 'react-native';
-import { Camera, useCameraDevices, useCodeScanner } from 'react-native-vision-camera';
+import { RNCamera } from 'react-native-camera';
+import QRCode from 'react-native-qrcode-svg';
 import { showMessage } from 'react-native-flash-message';
 import { useAuthStore } from '../../store/authStore';
 import {
@@ -22,6 +22,7 @@ import {
   QRCodeData,
   computeKeyFingerprint,
 } from '../../services/friendApi';
+import { deviceLinkService } from '../../services/deviceLinkService';
 import { colors } from '../../theme/colors';
 
 interface QRScannerScreenProps {
@@ -33,239 +34,197 @@ const SCAN_SIZE = width * 0.7;
 
 export default function QRScannerScreen({ navigation }: QRScannerScreenProps) {
   const { user } = useAuthStore();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showMyCode, setShowMyCode] = useState(false);
-  
-  const devices = useCameraDevices();
-  const device = devices.find(d => d.position === 'back');
+  const [hasScanned, setHasScanned] = useState(false);
 
-  // Request camera permission
-  useEffect(() => {
-    (async () => {
-      const status = await Camera.requestCameraPermission();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
-
-  // Generate my QR code data
   const getMyQRData = (): QRCodeData | null => {
-    if (!user?.public_key) return null;
-    
+    const pubKey = user?.public_key || user?.publicKey;
+    if (!pubKey) return null;
+
     return {
-      user_id: user.user_id,
+      user_id: user.user_id || user.id,
       username: user.username,
-      public_key_fingerprint: computeKeyFingerprint(user.public_key),
-      timestamp: new Date().toISOString(),
-      nonce: Math.random().toString(36).substring(2, 15),
+      public_key_fingerprint: computeKeyFingerprint(pubKey),
+      identity_key_fingerprint: '',
+      timestamp: Date.now(),
+      expires_in: 300,
     };
   };
 
-  // Handle scanned QR code
   const handleScan = async (data: string) => {
-    if (isProcessing) return;
-    
+    if (isProcessing || hasScanned) return;
+
+    setHasScanned(true);
     setIsProcessing(true);
-    
+
     try {
-      // Parse QR code data
-      const qrData: QRCodeData = JSON.parse(data);
-      
-      // Validate QR code structure
+      const qrData: any = JSON.parse(data);
+
+      // 1. Device Pairing
+      if (qrData.type === 'zerotrace_pair') {
+        const pubKey = user?.public_key || user?.publicKey;
+        if (!pubKey) throw new Error('Public Key not found. Please log in again.');
+
+        showMessage({
+          message: 'Verifying QR...',
+          type: 'info',
+        });
+
+        try {
+          // Note: scanPairingQR returns { challenge, fingerprint, device_public_key }
+          const result = await deviceLinkService.scanPairingQR(qrData, pubKey);
+
+          Alert.alert(
+            'Link New Device?',
+            `A new device is requesting access.\n\nFingerprint: ${result.fingerprint.substring(0, 16)}...`,
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => {
+                  setIsProcessing(false);
+                  navigation.goBack();
+                }
+              },
+              {
+                text: 'Link Device',
+                onPress: async () => {
+                  try {
+                    showMessage({ message: 'Securely Linking...', type: 'info' });
+                    await deviceLinkService.approvePairing(
+                      qrData.token,
+                      user.username,
+                      result.device_public_key
+                    );
+                    showMessage({ message: 'Device Linked Successfully', type: 'success' });
+                    navigation.replace('DeviceManagement');
+                  } catch (err: any) {
+                    showMessage({
+                      message: 'Linking Failed',
+                      description: err.message,
+                      type: 'danger'
+                    });
+                    setIsProcessing(false);
+                  }
+                }
+              }
+            ]
+          );
+        } catch (e: any) {
+          // If scan fails
+          showMessage({
+            message: 'Invalid Pairing QR',
+            description: e.message,
+            type: 'danger'
+          });
+          setIsProcessing(false);
+        }
+        return;
+      }
+
+      // 2. Add Contact
       if (!qrData.user_id || !qrData.username || !qrData.public_key_fingerprint) {
         throw new Error('Invalid QR code format');
       }
-      
-      // Check if scanning own code
-      if (qrData.user_id === user?.user_id) {
+
+      if (qrData.user_id === (user?.user_id || user?.id)) {
         showMessage({
           message: 'Invalid QR Code',
           description: 'You scanned your own QR code',
           type: 'warning',
         });
-        setIsProcessing(false);
         return;
       }
-      
-      // Check timestamp (QR codes valid for 5 minutes)
-      const timestamp = new Date(qrData.timestamp);
+
+      const timestamp = typeof qrData.timestamp === 'number' ? new Date(qrData.timestamp) : new Date(qrData.timestamp);
       const now = new Date();
       const diffMinutes = (now.getTime() - timestamp.getTime()) / (1000 * 60);
-      
       if (diffMinutes > 5) {
         showMessage({
           message: 'QR Code Expired',
           description: 'Please ask them to generate a new QR code',
           type: 'warning',
         });
-        setIsProcessing(false);
         return;
       }
-      
-      // Process QR scan
-      const response = await friendAPI.processQRScan(qrData);
-      
+
+      await friendAPI.processQRScan({ ...qrData, signature: '' });
       showMessage({
-        message: 'Contact Added!',
-        description: `You're now connected with ${qrData.username}`,
+        message: 'Contact Added',
+        description: `You are now connected with ${qrData.username}`,
         type: 'success',
       });
-      
       navigation.goBack();
-      
     } catch (error: any) {
-      if (error instanceof SyntaxError) {
-        showMessage({
-          message: 'Invalid QR Code',
-          description: 'This is not a valid ZeroTrace contact code',
-          type: 'danger',
-        });
-      } else {
-        showMessage({
-          message: 'Scan Failed',
-          description: error.response?.data?.detail || error.message,
-          type: 'danger',
-        });
-      }
+      showMessage({
+        message: 'Scan Failed',
+        description: error?.response?.data?.detail || error?.message || 'Invalid QR payload',
+        type: 'danger',
+      });
     } finally {
-      // Add delay before allowing next scan
-      setTimeout(() => setIsProcessing(false), 2000);
+      setTimeout(() => {
+        setIsProcessing(false);
+        setHasScanned(false);
+      }, 1200);
     }
   };
 
-  // Code scanner hook
-  const codeScanner = useCodeScanner({
-    codeTypes: ['qr'],
-    onCodeScanned: (codes) => {
-      if (codes.length > 0 && codes[0].value) {
-        handleScan(codes[0].value);
-      }
-    },
-  });
-
-  // Permission states
-  if (hasPermission === null) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <Text style={styles.messageText}>Requesting camera permission...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <Text style={styles.messageText}>Camera permission denied</Text>
-          <Text style={styles.subText}>
-            Please enable camera access in settings to scan QR codes
-          </Text>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.primaryButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // My QR Code view
   if (showMyCode) {
     const myQRData = getMyQRData();
-    
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setShowMyCode(false)}
-          >
-            <Text style={styles.backText}>← Back</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => setShowMyCode(false)}>
+            <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
           <Text style={styles.title}>My QR Code</Text>
         </View>
 
         <View style={styles.qrContainer}>
-          <View style={styles.qrPlaceholder}>
-            {/* In production, use react-native-qrcode-svg */}
-            <Text style={styles.qrPlaceholderText}>
-              {myQRData ? JSON.stringify(myQRData, null, 2) : 'No key available'}
-            </Text>
+          <View style={styles.qrCard}>
+            {myQRData ? (
+              <QRCode value={JSON.stringify(myQRData)} size={SCAN_SIZE - 48} />
+            ) : (
+              <Text style={styles.emptyText}>Generate encryption keys first</Text>
+            )}
           </View>
-          
-          <Text style={styles.qrInstructions}>
-            Let others scan this code to add you as a contact
-          </Text>
-          
-          <Text style={styles.qrNote}>
-            ⚠️ This code expires in 5 minutes for security
-          </Text>
+          <Text style={styles.note}>This code expires in 5 minutes.</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  // Scanner view
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backText}>← Back</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Scan QR Code</Text>
       </View>
 
-      {/* Camera */}
-      <View style={styles.cameraContainer}>
-        {device && (
-          <Camera
-            style={StyleSheet.absoluteFill}
-            device={device}
-            isActive={!isProcessing}
-            codeScanner={codeScanner}
-          />
-        )}
-        
-        {/* Scan overlay */}
-        <View style={styles.overlay}>
-          <View style={styles.scanArea}>
-            <View style={[styles.corner, styles.cornerTL]} />
-            <View style={[styles.corner, styles.cornerTR]} />
-            <View style={[styles.corner, styles.cornerBL]} />
-            <View style={[styles.corner, styles.cornerBR]} />
-          </View>
+      <View style={styles.scannerContainer}>
+        <Text style={styles.instructions}>Align QR code within the frame</Text>
+        <View style={styles.cameraWrapper}>
+          <RNCamera
+            style={styles.camera}
+            type={RNCamera.Constants.Type.back}
+            captureAudio={false}
+            onBarCodeRead={(event) => {
+              if (event?.data) {
+                handleScan(event.data);
+              }
+            }}
+            barCodeTypes={[RNCamera.Constants.BarCodeType.qr]}
+          >
+            <View style={styles.marker} />
+          </RNCamera>
         </View>
-
-        {/* Processing indicator */}
-        {isProcessing && (
-          <View style={styles.processingOverlay}>
-            <Text style={styles.processingText}>Processing...</Text>
-          </View>
-        )}
+        <TouchableOpacity style={styles.showMyCodeButton} onPress={() => setShowMyCode(true)}>
+          <Text style={styles.showMyCodeText}>Show My QR Code</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Instructions */}
-      <View style={styles.instructions}>
-        <Text style={styles.instructionText}>
-          Align the QR code within the frame to scan
-        </Text>
-      </View>
-
-      {/* Show my QR button */}
-      <TouchableOpacity
-        style={styles.showMyCodeButton}
-        onPress={() => setShowMyCode(true)}
-      >
-        <Text style={styles.showMyCodeText}>Show My QR Code</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -273,164 +232,88 @@ export default function QRScannerScreen({ navigation }: QRScannerScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.primary,
   },
   backButton: {
     marginRight: 16,
   },
   backText: {
-    color: '#fff',
+    color: colors.primary.main,
     fontSize: 16,
   },
   title: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
+    color: colors.text.primary,
   },
-  cameraContainer: {
+  scannerContainer: {
     flex: 1,
-    position: 'relative',
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  scanArea: {
-    width: SCAN_SIZE,
-    height: SCAN_SIZE,
-    backgroundColor: 'transparent',
-    position: 'relative',
-  },
-  corner: {
-    position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: colors.primary,
-    borderWidth: 3,
-  },
-  cornerTL: {
-    top: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-  },
-  cornerTR: {
-    top: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-  },
-  cornerBL: {
-    bottom: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-  },
-  cornerBR: {
-    bottom: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-  },
-  processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  processingText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
+    paddingHorizontal: 16,
+    paddingTop: 20,
   },
   instructions: {
-    padding: 24,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-  },
-  instructionText: {
-    color: '#fff',
+    color: colors.text.primary,
     fontSize: 14,
+    marginBottom: 12,
     textAlign: 'center',
+  },
+  cameraWrapper: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border.primary,
+  },
+  marker: {
+    width: SCAN_SIZE * 0.75,
+    height: SCAN_SIZE * 0.75,
+    borderColor: colors.primary.main,
+    borderWidth: 2,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
+  },
+  camera: {
+    height: SCAN_SIZE + 180,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   showMyCodeButton: {
-    margin: 16,
-    backgroundColor: colors.surface,
+    marginTop: 16,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   showMyCodeText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  centerContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  messageText: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  subText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  primaryButtonText: {
-    color: '#fff',
+    color: colors.text.primary,
     fontWeight: '600',
   },
   qrContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    justifyContent: 'center',
+    padding: 16,
   },
-  qrPlaceholder: {
+  qrCard: {
     width: SCAN_SIZE,
     height: SCAN_SIZE,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
     alignItems: 'center',
-    padding: 16,
-    marginBottom: 24,
+    justifyContent: 'center',
+    marginBottom: 14,
   },
-  qrPlaceholderText: {
-    color: '#000',
-    fontSize: 10,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  note: {
+    color: colors.text.secondary,
+    fontSize: 13,
   },
-  qrInstructions: {
-    color: colors.text,
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  qrNote: {
-    color: '#eab308',
-    fontSize: 12,
-    textAlign: 'center',
+  emptyText: {
+    color: '#111827',
   },
 });

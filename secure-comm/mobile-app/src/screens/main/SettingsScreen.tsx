@@ -1,8 +1,9 @@
 /**
  * Settings Screen with Glassmorphism and 3D Effects
+ * Includes Account Management, Security Info, Key Fingerprint
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,13 +11,21 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Platform,
+  Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useNavigation } from '@react-navigation/native';
+import { showMessage } from 'react-native-flash-message';
 
 import { colors } from '../../theme/colors';
+import { useChatStore } from '../../store/chatStore';
 import { useAuthStore } from '../../store/authStore';
 import { Glassmorphism, GlassCard } from '../../components/motion/Glassmorphism';
 import { TiltAvatar } from '../../components/motion/TiltAvatar';
+import { generateFingerprint } from '../../utils/crypto';
+import { apiClient } from '../../services/api';
+
 
 interface SettingItem {
   id: string;
@@ -32,14 +41,17 @@ const settingsGroups: SettingItem[][] = [
   [
     { id: 'account', icon: 'person', label: 'Account', description: 'Manage your profile', color: colors.primary.main },
     { id: 'privacy', icon: 'shield-checkmark', label: 'Privacy & Security', description: 'Encryption settings', color: colors.status.success },
+    { id: 'trusted_contacts', icon: 'people', label: 'Trusted Contacts', description: 'Verified contacts list', color: '#06B6D4' },
     { id: 'notifications', icon: 'notifications', label: 'Notifications', description: 'Message alerts', color: colors.status.warning, hasSwitch: true },
   ],
   [
     { id: 'appearance', icon: 'color-palette', label: 'Appearance', description: 'Theme and colors', color: colors.secondary.main },
     { id: 'storage', icon: 'folder', label: 'Storage & Data', description: 'Manage storage', color: colors.status.info },
     { id: 'devices', icon: 'phone-portrait', label: 'Linked Devices', description: 'Active sessions', color: colors.primary.main },
+    { id: 'sessions', icon: 'browsers', label: 'Active Sessions', description: 'Manage logged-in devices', color: '#06B6D4' },
   ],
   [
+    { id: 'account_actions', icon: 'settings', label: 'Account Actions', description: 'Username, disable, delete', color: '#F59E0B' },
     { id: 'help', icon: 'help-circle', label: 'Help & Support', color: colors.text.secondary },
     { id: 'about', icon: 'information-circle', label: 'About', description: 'Version 1.0.0', color: colors.text.secondary },
     { id: 'logout', icon: 'log-out', label: 'Sign Out', color: colors.status.error, isDanger: true },
@@ -47,24 +59,112 @@ const settingsGroups: SettingItem[][] = [
 ];
 
 const SettingsScreen: React.FC = () => {
-  const { user, logout } = useAuthStore();
+  const navigation = useNavigation<any>();
+  const user = useChatStore((s) => s.user);
+  const publicKey = useChatStore((s) => s.publicKey);
+  const identityKey = useChatStore((s) => s.identityKey);
+  const chatLogout = useChatStore((s) => s.logout);
+  const authLogout = useAuthStore((s) => s.logout);
+
+  const fingerprint = useMemo(() => {
+    if (publicKey) return generateFingerprint(publicKey);
+    return null;
+  }, [publicKey]);
 
   const handleLogout = () => {
     Alert.alert(
       'Sign Out',
-      'Are you sure you want to sign out?',
+      'Are you sure you want to sign out? Your keys are stored securely for next login.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: logout },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            await chatLogout();
+            await authLogout();
+          },
+        },
       ]
     );
   };
 
-  const handleSettingPress = (id: string) => {
-    if (id === 'logout') {
-      handleLogout();
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      '⚠️ Delete Account',
+      'This will permanently delete your account and all data after 30 days. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await apiClient.delete('/auth/account');
+              showMessage({
+                message: 'Account Scheduled for Deletion',
+                description: 'Your account will be permanently deleted in 30 days.',
+                type: 'warning',
+              });
+              await chatLogout();
+              await authLogout();
+            } catch (error) {
+              showMessage({ message: 'Failed to delete account', type: 'danger' });
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCopyFingerprint = () => {
+    if (fingerprint) {
+      Clipboard.setString(fingerprint);
+      showMessage({ message: 'Fingerprint Copied', type: 'success' });
     }
-    // Other settings would navigate to their respective screens
+  };
+
+  const handleSettingPress = (id: string) => {
+    switch (id) {
+      case 'logout':
+        handleLogout();
+        return;
+      case 'account':
+        navigation.navigate('Profile');
+        return;
+      case 'privacy':
+        navigation.navigate('SecuritySettings');
+        return;
+      case 'trusted_contacts':
+        navigation.navigate('TrustedContacts');
+        return;
+      case 'notifications':
+        navigation.navigate('NotificationSettings');
+        return;
+      case 'appearance':
+        navigation.navigate('AppearanceSettings');
+        return;
+      case 'storage':
+        navigation.navigate('DataStorage');
+        return;
+      case 'devices':
+        navigation.navigate('DeviceManagement');
+        return;
+      case 'sessions':
+        navigation.navigate('SessionManagement');
+        return;
+      case 'account_actions':
+        navigation.navigate('AccountActions');
+        return;
+      case 'delete_account':
+        handleDeleteAccount();
+        return;
+      case 'fingerprint':
+        handleCopyFingerprint();
+        return;
+      default:
+        break;
+    }
   };
 
   const renderSettingItem = (item: SettingItem, index: number, isLast: boolean) => (
@@ -114,7 +214,7 @@ const SettingsScreen: React.FC = () => {
         </TiltAvatar>
         <Text style={styles.username}>{user?.username || 'User'}</Text>
         <Text style={styles.email}>{user?.email || 'user@example.com'}</Text>
-        
+
         {/* Quick Stats */}
         <View style={styles.statsContainer}>
           <Glassmorphism style={styles.statCard} blur="sm">
@@ -127,6 +227,24 @@ const SettingsScreen: React.FC = () => {
           </Glassmorphism>
         </View>
       </View>
+
+      {/* Key Fingerprint */}
+      {fingerprint && (
+        <View style={styles.groupContainer}>
+          <Text style={styles.groupTitle}>Your Key Fingerprint</Text>
+          <TouchableOpacity
+            style={styles.fingerprintCard}
+            onPress={handleCopyFingerprint}
+            activeOpacity={0.7}
+          >
+            <Icon name="finger-print" size={24} color={colors.primary.main} />
+            <View style={styles.fingerprintInfo}>
+              <Text style={styles.fingerprintText}>{fingerprint}</Text>
+              <Text style={styles.fingerprintHint}>Tap to copy • Share to verify identity</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Settings Groups */}
       {settingsGroups.map((group, groupIndex) => (
@@ -142,9 +260,29 @@ const SettingsScreen: React.FC = () => {
         </View>
       ))}
 
+      {/* Danger Zone */}
+      <View style={styles.groupContainer}>
+        <Text style={[styles.groupTitle, { color: colors.status.error }]}>Danger Zone</Text>
+        <GlassCard>
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={handleDeleteAccount}
+          >
+            <View style={[styles.iconContainer, { backgroundColor: `${colors.status.error}20` }]}>
+              <Icon name="warning" size={22} color={colors.status.error} />
+            </View>
+            <View style={styles.settingInfo}>
+              <Text style={styles.dangerText}>Delete Account</Text>
+              <Text style={styles.settingDescription}>Permanently remove your account and data</Text>
+            </View>
+            <Icon name="chevron-forward" size={20} color={colors.status.error} />
+          </TouchableOpacity>
+        </GlassCard>
+      </View>
+
       {/* Footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>CipherLink v1.0.0</Text>
+        <Text style={styles.footerText}>ZeroTrace v1.0.0</Text>
         <Text style={styles.footerSubtext}>Private by design. Secure by default.</Text>
       </View>
     </ScrollView>
@@ -272,6 +410,7 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: 'center',
     paddingVertical: 32,
+    paddingBottom: 50,
   },
   footerText: {
     fontSize: 14,
@@ -280,6 +419,30 @@ const styles = StyleSheet.create({
   },
   footerSubtext: {
     fontSize: 12,
+    color: colors.text.muted,
+    marginTop: 4,
+  },
+  fingerprintCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: colors.background.secondary,
+    borderRadius: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: `${colors.primary.main}30`,
+  },
+  fingerprintInfo: {
+    flex: 1,
+  },
+  fingerprintText: {
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colors.text.primary,
+    letterSpacing: 1,
+  },
+  fingerprintHint: {
+    fontSize: 11,
     color: colors.text.muted,
     marginTop: 4,
   },

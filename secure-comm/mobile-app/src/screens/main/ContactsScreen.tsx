@@ -26,6 +26,7 @@ import { contactsAPI } from '../../services/api';
 import {
   friendAPI,
   TrustedContact,
+  TrustLevel,
   formatFingerprint,
 } from '../../services/friendApi';
 
@@ -40,16 +41,21 @@ interface LegacyContact {
 }
 
 // Combined contact type
-interface Contact extends Partial<LegacyContact>, Partial<TrustedContact> {
+interface Contact extends Partial<LegacyContact> {
   id?: number;
   contact_id?: number;
   contact_user_id?: number;
   contact_username: string;
   contact_email?: string;
+  public_key?: string;
+  identity_key?: string;
   is_blocked?: boolean;
   is_verified?: boolean;
-  trust_level?: string;
-  contact_public_key_fingerprint?: string;
+  trust_level?: TrustLevel;
+  public_key_fingerprint?: string;
+  nickname?: string;
+  last_key_exchange?: string;
+  created_at?: string;
 }
 
 const ContactsScreen: React.FC = () => {
@@ -70,11 +76,11 @@ const ContactsScreen: React.FC = () => {
         id: tc.contact_user_id,
         contact_id: tc.contact_user_id,
       }));
-      
+
       // Try to get pending requests count
       try {
-        const pendingResponse = await friendAPI.getPendingRequests('incoming');
-        setPendingCount(pendingResponse.data.length);
+        const pendingResponse = await friendAPI.getPendingRequests();
+        setPendingCount(pendingResponse.data.incoming?.length || pendingResponse.data.total_incoming || 0);
       } catch {
         setPendingCount(0);
       }
@@ -141,7 +147,7 @@ const ContactsScreen: React.FC = () => {
         message: 'Contact Removed',
         type: 'success',
       });
-      setContacts(prev => prev.filter(c => 
+      setContacts(prev => prev.filter(c =>
         (c.contact_user_id || c.contact_id) !== contactId
       ));
     } catch (error: any) {
@@ -177,12 +183,12 @@ const ContactsScreen: React.FC = () => {
 
     setActionContactId(contactId);
     try {
-      await friendAPI.blockUser({ user_id: contactId });
+      await friendAPI.blockUser({ user_id: contactId, reason: 'unwanted' as const });
       showMessage({
         message: 'User Blocked',
         type: 'info',
       });
-      setContacts(prev => prev.filter(c => 
+      setContacts(prev => prev.filter(c =>
         (c.contact_user_id || c.contact_id) !== contactId
       ));
     } catch (error: any) {
@@ -201,7 +207,7 @@ const ContactsScreen: React.FC = () => {
     navigation.navigate('Chat', {
       userId: contact.contact_user_id || contact.contact_id,
       username: contact.contact_username,
-      publicKey: contact.contact_public_key,
+      publicKey: contact.public_key,
     });
   };
 
@@ -210,7 +216,7 @@ const ContactsScreen: React.FC = () => {
     if (contact.is_verified) {
       return { icon: 'checkmark-circle', color: colors.status.success };
     }
-    if (contact.trust_level === 'high') {
+    if ((contact.trust_level as string) === 'high') {
       return { icon: 'shield-checkmark', color: colors.primary.main };
     }
     return null;
@@ -227,7 +233,7 @@ const ContactsScreen: React.FC = () => {
 
     return (
       <TiltCard style={styles.contactCard}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.contactContent}
           onPress={() => handleStartChat(item)}
           disabled={isProcessing}
@@ -252,15 +258,15 @@ const ContactsScreen: React.FC = () => {
             {item.contact_email && (
               <Text style={styles.email}>{item.contact_email}</Text>
             )}
-            {item.contact_public_key_fingerprint && (
+            {item.public_key_fingerprint && (
               <Text style={styles.fingerprint}>
-                🔑 {formatFingerprint(item.contact_public_key_fingerprint, true)}
+                🔑 {formatFingerprint(item.public_key_fingerprint, true)}
               </Text>
             )}
             {item.trust_level && (
-              <View style={[styles.trustLabel, 
-                item.trust_level === 'high' && styles.trustLabelHigh,
-                item.trust_level === 'medium' && styles.trustLabelMedium,
+              <View style={[styles.trustLabel,
+              (item.trust_level as string) === 'high' && styles.trustLabelHigh,
+              (item.trust_level as string) === 'medium' && styles.trustLabelMedium,
               ]}>
                 <Text style={styles.trustLabelText}>
                   {item.is_verified ? '✓ Verified' : item.trust_level}
@@ -275,13 +281,13 @@ const ContactsScreen: React.FC = () => {
               <ActivityIndicator size="small" color={colors.primary.main} />
             ) : (
               <>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => handleStartChat(item)}
                 >
                   <Icon name="chatbubble-outline" size={22} color={colors.primary.main} />
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => handleRemoveContact(item)}
                 >
@@ -302,7 +308,7 @@ const ContactsScreen: React.FC = () => {
         <Text style={styles.headerTitle}>Contacts</Text>
         <View style={styles.headerActions}>
           {/* Pending requests badge */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.pendingButton}
             onPress={() => navigation.navigate('PendingRequests')}
           >
@@ -315,7 +321,7 @@ const ContactsScreen: React.FC = () => {
               </View>
             )}
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.addButton}
             onPress={() => navigation.navigate('AddContact')}
           >
@@ -347,7 +353,9 @@ const ContactsScreen: React.FC = () => {
       <FlatList
         data={filteredContacts}
         renderItem={renderContact}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item) =>
+          String(item.id ?? item.contact_user_id ?? item.contact_id ?? item.contact_username)
+        }
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />

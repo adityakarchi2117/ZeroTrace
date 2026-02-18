@@ -43,8 +43,8 @@ export default function TrustVerificationScreen({
   const [verificationStep, setVerificationStep] = useState<'instructions' | 'compare' | 'complete'>('instructions');
 
   // Get my fingerprint
-  const myFingerprint = user?.public_key 
-    ? computeKeyFingerprint(user.public_key) 
+  const myFingerprint = (user?.public_key || user?.publicKey)
+    ? computeKeyFingerprint(user?.public_key || user?.publicKey || '')
     : '';
 
   // Format fingerprint for display
@@ -58,12 +58,11 @@ export default function TrustVerificationScreen({
     try {
       await friendAPI.verifyContact({
         contact_user_id: contact.contact_user_id,
-        verification_method: 'manual_fingerprint',
-        verified_fingerprint: contact.contact_public_key_fingerprint,
+        verified_fingerprint: contact.public_key_fingerprint,
       });
 
       setVerificationStep('complete');
-      
+
       showMessage({
         message: 'Contact Verified!',
         description: `${contact.contact_username} is now a verified contact`,
@@ -137,20 +136,20 @@ export default function TrustVerificationScreen({
           </Text>
 
           <Text style={styles.description}>
-            To ensure you're communicating with the real {contact.contact_username} 
-            and not an impersonator, you should verify their key fingerprint through 
+            To ensure you're communicating with the real {contact.contact_username}
+            and not an impersonator, you should verify their key fingerprint through
             a trusted channel.
           </Text>
 
           <View style={styles.stepsContainer}>
             <Text style={styles.stepsTitle}>Verification Steps:</Text>
-            
+
             <View style={styles.step}>
               <View style={styles.stepNumber}>
                 <Text style={styles.stepNumberText}>1</Text>
               </View>
               <Text style={styles.stepText}>
-                Contact {contact.contact_username} through a trusted channel 
+                Contact {contact.contact_username} through a trusted channel
                 (in person, phone call, video chat)
               </Text>
             </View>
@@ -185,7 +184,7 @@ export default function TrustVerificationScreen({
 
           <View style={styles.warningBox}>
             <Text style={styles.warningText}>
-              ⚠️ Never verify fingerprints over an unencrypted channel or text message, 
+              ⚠️ Never verify fingerprints over an unencrypted channel or text message,
               as these can be intercepted.
             </Text>
           </View>
@@ -223,7 +222,7 @@ export default function TrustVerificationScreen({
             </Text>
             <View style={styles.fingerprintBox}>
               <Text style={styles.fingerprintValue}>
-                {formatForDisplay(contact.contact_public_key_fingerprint)}
+                {formatForDisplay(contact.public_key_fingerprint)}
               </Text>
             </View>
             <Text style={styles.fingerprintHint}>
@@ -247,7 +246,7 @@ export default function TrustVerificationScreen({
           {/* Verification question */}
           <View style={styles.questionBox}>
             <Text style={styles.questionText}>
-              Does the fingerprint {contact.contact_username} read match exactly 
+              Does the fingerprint {contact.contact_username} read match exactly
               what's shown above?
             </Text>
           </View>
@@ -288,7 +287,7 @@ export default function TrustVerificationScreen({
         <Text style={styles.completeHeading}>Verification Complete!</Text>
 
         <Text style={styles.completeText}>
-          {contact.contact_username} is now a verified contact. 
+          {contact.contact_username} is now a verified contact.
           You can be confident you're communicating with the real person.
         </Text>
 
@@ -312,26 +311,26 @@ export default function TrustVerificationScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.background.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border.primary,
   },
   backButton: {
     marginRight: 16,
   },
   backText: {
-    color: colors.primary,
+    color: colors.primary.main,
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
   },
   content: {
     flex: 1,
@@ -347,25 +346,25 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 16,
   },
   description: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 32,
   },
   stepsContainer: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
     padding: 20,
     marginBottom: 24,
   },
   stepsTitle: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 16,
@@ -378,7 +377,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary.main,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -390,7 +389,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     flex: 1,
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -406,7 +405,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   primaryButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primary.main,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -421,43 +420,43 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   fingerprintLabel: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
   },
   fingerprintBox: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.border.primary,
   },
   myFingerprintBox: {
-    borderColor: colors.primary,
+    borderColor: colors.primary.main,
     backgroundColor: 'rgba(59, 130, 246, 0.05)',
   },
   fingerprintValue: {
-    color: colors.text,
+    color: colors.text.primary,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 12,
     lineHeight: 20,
   },
   fingerprintHint: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 12,
     marginTop: 8,
     fontStyle: 'italic',
   },
   questionBox: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background.secondary,
     borderRadius: 12,
     padding: 20,
     marginBottom: 24,
     alignItems: 'center',
   },
   questionText: {
-    color: colors.text,
+    color: colors.text.primary,
     fontSize: 16,
     textAlign: 'center',
     lineHeight: 24,
@@ -511,11 +510,11 @@ const styles = StyleSheet.create({
   completeHeading: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.text,
+    color: colors.text.primary,
     marginBottom: 16,
   },
   completeText: {
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 22,
@@ -534,3 +533,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
