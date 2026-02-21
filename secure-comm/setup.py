@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CipherLink Platform Setup Script
-Automated setup for the complete CipherLink platform
+ZeroTrace Platform Setup Script
+Automated setup for the complete ZeroTrace platform
 """
 
 import os
@@ -85,7 +85,7 @@ def setup_backend():
     secret_key = secrets.token_urlsafe(32)
     
     # Create .env file
-    env_content = f"""# CipherLink Backend Configuration
+    env_content = f"""# ZeroTrace Backend Configuration
 DATABASE_URL=sqlite:///./secure_comm.db
 SECRET_KEY={secret_key}
 ALGORITHM=HS256
@@ -110,7 +110,7 @@ def setup_web_client():
     run_command("npm install", cwd=web_dir)
     
     # Create .env.local
-    env_content = """# CipherLink Web Client Configuration
+    env_content = """# ZeroTrace Web Client Configuration
 NEXT_PUBLIC_API_URL=http://localhost:8000/api
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 NEXT_PUBLIC_ENVIRONMENT=development
@@ -178,10 +178,10 @@ def create_run_scripts():
     
     # Backend run script
     backend_script = """#!/bin/bash
-# CipherLink Backend Runner
+# ZeroTrace Backend Runner
 cd secure-comm/backend
 source venv/bin/activate 2>/dev/null || venv\\Scripts\\activate
-echo "🚀 Starting CipherLink API server..."
+echo "🚀 Starting ZeroTrace API server..."
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
     
@@ -190,9 +190,9 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
     
     # Web client run script
     web_script = """#!/bin/bash
-# CipherLink Web Client Runner
+# ZeroTrace Web Client Runner
 cd secure-comm/web-client
-echo "🌐 Starting CipherLink web client..."
+echo "🌐 Starting ZeroTrace web client..."
 npm run dev
 """
     
@@ -201,9 +201,9 @@ npm run dev
     
     # Mobile run script
     mobile_script = """#!/bin/bash
-# CipherLink Mobile App Runner
+# ZeroTrace Mobile App Runner
 cd secure-comm/mobile-app
-echo "📱 Starting CipherLink mobile app..."
+echo "📱 Starting ZeroTrace mobile app..."
 echo "Choose platform:"
 echo "1) Android"
 echo "2) iOS"
@@ -331,7 +331,7 @@ CMD ["npm", "start"]
 def print_completion_message():
     """Print setup completion message"""
     print("\n" + "="*60)
-    print("🎉 CipherLink Platform Setup Complete!")
+    print("🎉 ZeroTrace Platform Setup Complete!")
     print("="*60)
     print()
     print("🚀 Quick Start:")
@@ -367,7 +367,7 @@ def print_completion_message():
 
 def main():
     """Main setup function"""
-    print("🔐 CipherLink Platform Setup")
+    print("🔐 ZeroTrace Platform Setup")
     print("=" * 40)
     
     try:

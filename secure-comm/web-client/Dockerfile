@@ -1,4 +1,4 @@
-# CipherLink Web Client Dockerfile
+# ZeroTrace Web Client Dockerfile
 FROM node:18-alpine AS base
 
 # Install dependencies only when needed

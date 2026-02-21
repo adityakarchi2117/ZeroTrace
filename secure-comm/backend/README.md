@@ -1,4 +1,4 @@
-# CipherLink Backend API
+# ZeroTrace Backend API
 
 🔐 **Private by design. Secure by default.**
 

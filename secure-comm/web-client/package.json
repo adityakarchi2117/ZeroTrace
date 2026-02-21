@@ -1,8 +1,8 @@
 {
-  "name": "cipherlink-web",
+  "name": "ZeroTrace-web",
   "version": "1.0.0",
   "private": true,
-  "description": "CipherLink - Private by design. Secure by default.",
+  "description": "ZeroTrace - Private by design. Secure by default.",
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
     "build": "next build",

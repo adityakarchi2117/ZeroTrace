@@ -7,7 +7,7 @@ MOBILE-INTEGRATION-STATUS.md
 AWS-ARCHITECTURE-COMPLETE.md
 
 # AWS Architecture Diagrams & Scripts
-aws-architecture/
+aws-architecture,documentation/
 aws-diagrams/
 generate-aws-diagram.py
 secure-comm-aws.png
