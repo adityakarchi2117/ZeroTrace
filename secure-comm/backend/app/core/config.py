@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def ALLOWED_HOSTS(self) -> List[str]:
-        defaults = ["localhost", "127.0.0.1", "*"]
+        defaults = ["localhost", "127.0.0.1"]
         return parse_env_list(self.CORS_HOSTS, defaults)
     
     @computed_field
@@ -134,7 +134,34 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    
+    # AUDIT FIX: Fail loudly if SECRET_KEY is the default in production
+    _INSECURE_DEFAULTS = {
+        "your-secret-key-here-change-in-production-use-openssl-rand-hex-32",
+        "your-super-secret-key-change-in-production",
+        "changeme",
+        "secret",
+    }
+    if s.SECRET_KEY in _INSECURE_DEFAULTS:
+        if s.ENVIRONMENT == "production":
+            import sys
+            print(
+                "\n\U0001f6a8 CRITICAL SECURITY ERROR: SECRET_KEY is set to an insecure default!\n"
+                "   Set a strong SECRET_KEY environment variable before running in production.\n"
+                "   Generate one with: openssl rand -hex 64\n",
+                file=sys.stderr,
+            )
+            raise RuntimeError("Insecure SECRET_KEY in production environment")
+        else:
+            import warnings
+            warnings.warn(
+                "\U0001f6a8 SECRET_KEY is set to an insecure default! "
+                "Set SECRET_KEY env var. Generate one with: openssl rand -hex 64",
+                stacklevel=2,
+            )
+    
+    return s
 
 
 settings = get_settings()

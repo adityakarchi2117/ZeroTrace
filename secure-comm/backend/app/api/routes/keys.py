@@ -101,16 +101,47 @@ async def upload_keys(
             detail="User not found"
         )
     
+    # === KEY HISTORY: Save previous key before overwriting ===
+    # This preserves old public keys so messages encrypted with them
+    # can still be referenced for decryption diagnostics.
+    if user.public_key and user.public_key != key_data.public_key:
+        from app.db.device_sync_models import PublicKeyHistory
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        history_entry = PublicKeyHistory(
+            user_id=user_id,
+            public_key=user.public_key,
+            identity_key=user.identity_key,
+            signed_prekey=user.signed_prekey,
+            signed_prekey_signature=user.signed_prekey_signature,
+            active_from=user.signed_prekey_timestamp,
+            reason="key_upload",
+        )
+        db.add(history_entry)
+        logger.info(f"📋 Saved key history for user {user_id} before key update")
+    
     user.public_key = key_data.public_key
     user.identity_key = key_data.identity_key
     user.signed_prekey = key_data.signed_prekey
     user.signed_prekey_signature = key_data.signed_prekey_signature
     
-    # Store one-time pre-keys
+    # BUGFIX: Delete existing one-time prekeys before inserting new batch
+    # to prevent key_id collisions with stale prekeys
+    db.query(OneTimePreKey).filter(OneTimePreKey.user_id == user_id).delete()
+    
+    # Get max existing key_id to assign unique IDs
+    max_key_id_row = db.query(OneTimePreKey.key_id)\
+        .filter(OneTimePreKey.user_id == user_id)\
+        .order_by(OneTimePreKey.key_id.desc())\
+        .first()
+    start_id = (max_key_id_row[0] + 1) if max_key_id_row else 0
+    
+    # Store one-time pre-keys with unique key_ids
     for idx, otpk in enumerate(key_data.one_time_prekeys):
         prekey = OneTimePreKey(
             user_id=user_id,
-            key_id=idx,
+            key_id=start_id + idx,
             public_key=otpk
         )
         db.add(prekey)
@@ -218,20 +249,35 @@ async def get_key_bundle(
             detail=f"User '{username}' has not uploaded keys"
         )
     
-    # Get and consume one-time pre-key
-    one_time_prekey = db.query(OneTimePreKey)\
-        .filter(
-            OneTimePreKey.user_id == user.id,
-            OneTimePreKey.is_used == False
-        )\
-        .first()
+    # AUDIT FIX: Atomic prekey consumption to prevent race condition.
+    # Uses SELECT ... FOR UPDATE SKIP LOCKED (PostgreSQL) to ensure
+    # two concurrent requests never consume the same prekey.
+    from sqlalchemy import text
+    from datetime import datetime as dt
     
     otpk_value = None
+    try:
+        # Try atomic approach first (PostgreSQL)
+        one_time_prekey = db.query(OneTimePreKey)\
+            .filter(
+                OneTimePreKey.user_id == user.id,
+                OneTimePreKey.is_used == False
+            )\
+            .with_for_update(skip_locked=True)\
+            .first()
+    except Exception:
+        # Fallback for SQLite (no FOR UPDATE support)
+        one_time_prekey = db.query(OneTimePreKey)\
+            .filter(
+                OneTimePreKey.user_id == user.id,
+                OneTimePreKey.is_used == False
+            )\
+            .first()
+    
     if one_time_prekey:
         otpk_value = one_time_prekey.public_key
         one_time_prekey.is_used = True
-        from datetime import datetime
-        one_time_prekey.used_at = datetime.utcnow()
+        one_time_prekey.used_at = dt.utcnow()
         db.commit()
     
     return KeyBundleResponse(
@@ -268,3 +314,53 @@ async def get_user_public_key(
         )
     
     return result
+
+
+@router.get("/history/{username}")
+async def get_key_history(
+    username: str,
+    limit: int = 10,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical public keys for a user.
+    
+    Used by clients to attempt decryption of old messages
+    when the sender's current key doesn't match the key
+    used to encrypt the message.
+    
+    Returns a list of previous public keys ordered by most recent first.
+    """
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+    
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found"
+        )
+    
+    from app.db.device_sync_models import PublicKeyHistory
+    
+    history = db.query(PublicKeyHistory)\
+        .filter(PublicKeyHistory.user_id == user.id)\
+        .order_by(PublicKeyHistory.active_until.desc())\
+        .limit(limit)\
+        .all()
+    
+    return [
+        {
+            "public_key": h.public_key,
+            "identity_key": h.identity_key,
+            "active_from": h.active_from.isoformat() if h.active_from else None,
+            "active_until": h.active_until.isoformat() if h.active_until else None,
+            "reason": h.reason,
+        }
+        for h in history
+    ]

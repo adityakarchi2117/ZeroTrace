@@ -1,0 +1,43 @@
+FILE: components\ChatView.tsx
+  LINE: 23
+  UNUSED ICONS: ['Lock', 'Mic', 'MicOff', 'VideoOff', 'Monitor']
+  EXISTING IMPORT: import { Lock, Send, Smile, Paperclip, Phone, Video, MoreVertical, Shield, Check, CheckCheck, Clock, ArrowLeft, Info, X, PhoneOff, Mic, MicOff, VideoOff, Image, File, Loader2, Download, FileText, AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff, QrCode, RefreshCw } from 'lucide-react';
+  CORRECTED IMPORT: import { Send, Smile, Paperclip, Phone, Video, MoreVertical, Shield, Check, CheckCheck, Clock, ArrowLeft, Info, X, PhoneOff, Image, File, Loader2, Download, FileText, AlertCircle, Trash2, UserX, UserMinus, ShieldOff, QrCode, RefreshCw } from 'lucide-react';
+
+FILE: components\EnhancedCallView.tsx
+  LINE: 16
+  UNUSED ICONS: ['MoreVertical']
+  EXISTING IMPORT: import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Monitor, Maximize2, Minimize2, PictureInPicture, RefreshCw, MoreVertical } from 'lucide-react';
+  CORRECTED IMPORT: import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Monitor, Maximize2, Minimize2, PictureInPicture, RefreshCw } from 'lucide-react';
+
+FILE: components\PrivacyDashboard.tsx
+  LINE: 9
+  UNUSED ICONS: ['Search']
+  EXISTING IMPORT: import { Shield, Eye, MessageSquare, Search, Download } from "lucide-react";
+  CORRECTED IMPORT: import { Shield, Eye, MessageSquare, Download } from 'lucide-react';
+
+FILE: components\ProfileActionsMenu.tsx
+  LINE: 10
+  UNUSED ICONS: ['Key', 'Bell', 'BellOff']
+  EXISTING IMPORT: import { MoreVertical, UserMinus, Shield, ShieldCheck, Key, Copy, Bell, BellOff, AlertTriangle, Loader2, Check, Fingerprint, QrCode, } from 'lucide-react';
+  CORRECTED IMPORT: import { MoreVertical, UserMinus, Shield, ShieldCheck, Copy, AlertTriangle, Loader2, Check, Fingerprint, QrCode } from 'lucide-react';
+
+FILE: components\SettingsModal.tsx
+  LINE: 11
+  UNUSED ICONS: ['UserX', 'ChevronRight']
+  EXISTING IMPORT: import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type, Camera, Save, Loader2, Eye, Lock, Smartphone, Globe, UserX, ChevronRight, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
+  CORRECTED IMPORT: import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type, Camera, Save, Loader2, Eye, Lock, Smartphone, Globe, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
+
+FILE: components\Sidebar.tsx
+  LINE: 8
+  UNUSED ICONS: ['User as UserIcon']
+  EXISTING IMPORT: import { Lock, Search, Plus, Settings, LogOut, MessageSquare, Shield, User as UserIcon, Loader2, UserPlus, X, Users, ShieldBan, RefreshCw, Volume2, VolumeX, Bell } from 'lucide-react';
+  CORRECTED IMPORT: import { Lock, Search, Plus, Settings, LogOut, MessageSquare, Shield, Loader2, UserPlus, X, Users, ShieldBan, RefreshCw, Volume2, VolumeX, Bell } from 'lucide-react';
+
+FILE: components\SmartCallOverlay.tsx
+  LINE: 11
+  UNUSED ICONS: ['Phone']
+  EXISTING IMPORT: import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+  CORRECTED IMPORT: import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+
+Total files with unused imports: 7

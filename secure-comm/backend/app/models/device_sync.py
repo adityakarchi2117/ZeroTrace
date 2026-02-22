@@ -193,6 +193,22 @@ class DeviceWrappedDEKResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class StoreWrappedDEKRequest(BaseModel):
+    """Request body for storing a per-device wrapped DEK (moved from query params for security)."""
+    device_id: str = Field(..., description="Target device ID")
+    wrapped_dek: str = Field(..., description="DEK wrapped for this device (base64)")
+    wrap_nonce: str = Field(..., description="Nonce used for wrapping (base64)")
+    dek_version: int = Field(..., description="DEK version being wrapped")
+
+
+class RegisterDeviceRequest(BaseModel):
+    """Request body for registering a device (moved from query params for security)."""
+    device_id: str = Field(..., description="Unique device identifier")
+    device_name: str = Field(default="Web Browser", description="Human-readable device name")
+    device_type: str = Field(default="web", description="Device type (web, mobile, desktop)")
+    device_public_key: str = Field(default="", description="Device's public key for DEK wrapping")
+
+
 # ==================== Revocation Log ====================
 
 class RevocationLogEntry(BaseModel):

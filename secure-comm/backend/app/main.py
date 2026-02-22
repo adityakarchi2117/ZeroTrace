@@ -19,8 +19,9 @@ from contextlib import asynccontextmanager
 import asyncio
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
+from app.core.security import get_current_user_id
 from app.api.routes import auth, keys, messages
 from app.api.routes.vault import router as vault_router
 from app.api.routes.contacts import router as contacts_router
@@ -42,7 +43,8 @@ from app.db.secure_profile_models import (
 # Import device sync models to ensure they're registered with SQLAlchemy
 from app.db.device_sync_models import (
     DevicePairingSession, DeviceWrappedDEK, DeviceAuthorization,
-    EncryptedSessionKey, DeviceRevocationLog
+    EncryptedSessionKey, DeviceRevocationLog,
+    RecoveryKeyBackup, PublicKeyHistory
 )
 
 # Configure logging
@@ -54,68 +56,88 @@ logger = logging.getLogger(__name__)
 
 # Background task for ephemeral message cleanup
 async def cleanup_expired_messages():
-    """Periodically delete expired ephemeral messages"""
+    """Periodically delete expired ephemeral messages.
+    
+    AUDIT FIX: Uses try/finally to prevent session leaks on error.
+    AUDIT FIX: Wrapped sync DB work in asyncio.to_thread to avoid blocking event loop.
+    """
     from app.db.database import SessionLocal, Message
     
-    while True:
+    def _do_cleanup():
+        db = None
         try:
             db = SessionLocal()
-            # Delete messages past their expiry time
             expired = db.query(Message).filter(
                 Message.expires_at != None,
-                Message.expires_at < datetime.utcnow()
+                Message.expires_at < datetime.now(timezone.utc)
             ).delete()
             
             if expired > 0:
                 logger.info(f"🧹 Cleaned up {expired} expired messages")
             
             db.commit()
-            db.close()
+            return expired
         except Exception as e:
             logger.error(f"❌ Error in message cleanup: {e}")
-        
-        # Run every minute
+            if db:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+        finally:
+            if db:
+                db.close()
+    
+    while True:
+        await asyncio.to_thread(_do_cleanup)
         await asyncio.sleep(60)
 
 # Background task for key rotation
 async def rotate_signed_prekeys():
-    """Rotate signed prekeys weekly for enhanced security"""
+    """Rotate signed prekeys weekly for enhanced security.
+    
+    AUDIT FIX: Uses try/finally to prevent session leaks on error.
+    AUDIT FIX: Wrapped sync DB work in asyncio.to_thread to avoid blocking event loop.
+    """
     from app.db.database import SessionLocal, User
     from datetime import timedelta
     
-    while True:
+    def _do_rotation_check():
+        db = None
         try:
             db = SessionLocal()
-            # Find users with old signed prekeys (older than 7 days)
-            week_ago = datetime.utcnow() - timedelta(days=7)
+            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
             users_needing_rotation = db.query(User).filter(
                 User.signed_prekey_timestamp < week_ago
             ).all()
             
             if users_needing_rotation:
                 logger.info(f"🔄 {len(users_needing_rotation)} users need key rotation")
-                # Note: Actual rotation happens client-side, this just logs
-            
-            db.close()
         except Exception as e:
             logger.error(f"❌ Error in key rotation check: {e}")
-        
-        # Run daily
+        finally:
+            if db:
+                db.close()
+    
+    while True:
+        await asyncio.to_thread(_do_rotation_check)
         await asyncio.sleep(86400)
 
 # Background task for account cleanup
 async def cleanup_deleted_accounts():
-    """Permanently delete accounts marked for deletion over 30 days ago"""
+    """Permanently delete accounts marked for deletion over 30 days ago.
+    
+    AUDIT FIX: Wrapped sync DB work in asyncio.to_thread to avoid blocking event loop.
+    """
     from app.db.database import SessionLocal, User
     from datetime import timedelta
     
-    while True:
+    def _do_account_cleanup():
         db = None
         try:
             db = SessionLocal()
-            cutoff = datetime.utcnow() - timedelta(days=30)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
             
-            # Find users to delete
             to_delete = db.query(User).filter(
                 User.deleted_at != None,
                 User.deleted_at < cutoff
@@ -124,7 +146,6 @@ async def cleanup_deleted_accounts():
             if to_delete:
                 count = len(to_delete)
                 for user in to_delete:
-                    # Cascade delete should handle related records
                     db.delete(user)
                 
                 db.commit()
@@ -134,9 +155,79 @@ async def cleanup_deleted_accounts():
         finally:
             if db is not None:
                 db.close()
-        
-        # Run daily
+    
+    while True:
+        await asyncio.to_thread(_do_account_cleanup)
         await asyncio.sleep(86400)
+
+
+# BUGFIX: Background task to clean up expired/revoked refresh tokens
+async def cleanup_expired_tokens():
+    """Periodically remove expired and revoked refresh tokens to prevent table bloat."""
+    from app.db.database import SessionLocal, RefreshToken
+    
+    def _do_token_cleanup():
+        db = None
+        try:
+            db = SessionLocal()
+            now = datetime.now(timezone.utc)
+            deleted = db.query(RefreshToken).filter(
+                (RefreshToken.expires_at < now) | (RefreshToken.is_revoked == True)
+            ).delete(synchronize_session=False)
+            db.commit()
+            if deleted:
+                logger.info(f"🧹 Cleaned up {deleted} expired/revoked refresh tokens")
+        except Exception as e:
+            logger.error(f"❌ Error in token cleanup: {e}")
+        finally:
+            if db is not None:
+                db.close()
+    
+    while True:
+        await asyncio.to_thread(_do_token_cleanup)
+        await asyncio.sleep(3600)  # Run every hour
+
+
+# BUGFIX: Background task to prune excess profile history records
+async def prune_profile_history():
+    """Keep only the last 50 profile history entries per user to prevent unbounded growth."""
+    from app.db.database import SessionLocal, ProfileHistory
+    from sqlalchemy import func
+    
+    def _do_history_prune():
+        db = None
+        try:
+            db = SessionLocal()
+            # Find users with more than 50 history entries
+            user_counts = db.query(
+                ProfileHistory.user_id,
+                func.count(ProfileHistory.id).label('cnt')
+            ).group_by(ProfileHistory.user_id).having(func.count(ProfileHistory.id) > 50).all()
+            
+            total_pruned = 0
+            for user_id, count in user_counts:
+                excess = count - 50
+                oldest = db.query(ProfileHistory.id).filter(
+                    ProfileHistory.user_id == user_id
+                ).order_by(ProfileHistory.created_at.asc()).limit(excess).subquery()
+                
+                deleted = db.query(ProfileHistory).filter(
+                    ProfileHistory.id.in_(oldest)
+                ).delete(synchronize_session=False)
+                total_pruned += deleted
+            
+            if total_pruned:
+                db.commit()
+                logger.info(f"🧹 Pruned {total_pruned} old profile history entries")
+        except Exception as e:
+            logger.error(f"❌ Error in profile history prune: {e}")
+        finally:
+            if db is not None:
+                db.close()
+    
+    while True:
+        await asyncio.to_thread(_do_history_prune)
+        await asyncio.sleep(86400)  # Run daily
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -236,6 +327,8 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(cleanup_expired_messages())
     rotation_task = asyncio.create_task(rotate_signed_prekeys())
     account_cleanup_task = asyncio.create_task(cleanup_deleted_accounts())
+    token_cleanup_task = asyncio.create_task(cleanup_expired_tokens())
+    history_prune_task = asyncio.create_task(prune_profile_history())
     logger.info("⚙️  Background tasks started")
     
     yield
@@ -245,6 +338,8 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     rotation_task.cancel()
     account_cleanup_task.cancel()
+    token_cleanup_task.cancel()
+    history_prune_task.cancel()
     logger.info("✅ Shutdown complete")
 
 
@@ -337,7 +432,7 @@ logger.info(f"📋 CORS_ORIGINS env: {settings.CORS_ORIGINS}")
 # Security middleware
 app.add_middleware(
     TrustedHostMiddleware, 
-    allowed_hosts=["*"] # Force allow all for debugging
+    allowed_hosts=settings.ALLOWED_HOSTS
 )
 
 
@@ -355,7 +450,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "detail": "Internal server error",
-            "error": str(exc) if settings.ENVIRONMENT != "production" else "An error occurred"
+            # BUGFIX: Never leak exception details, even in non-production
+            "error": "An unexpected error occurred. Please try again later."
         }
     )
     
@@ -387,8 +483,11 @@ os.makedirs(_upload_dir, exist_ok=True)
 
 
 @app.get("/uploads/{path:path}", tags=["Uploads"])
-async def serve_upload(path: str):
-    """Serve uploaded files with path-traversal protection."""
+async def serve_upload(
+    path: str,
+    _user_id: int = Depends(get_current_user_id),  # BUGFIX: Require authentication
+):
+    """Serve uploaded files with path-traversal protection. Requires authentication."""
     # Resolve and validate the path stays within upload_dir
     requested = os.path.abspath(os.path.join(_upload_dir, path))
     if not requested.startswith(os.path.abspath(_upload_dir)):
@@ -422,22 +521,28 @@ async def root():
 
 @app.get("/health", tags=["Status"])
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint.
+    
+    AUDIT FIX: Uses text() for SQLAlchemy 2.x compatibility.
+    Uses try/finally to prevent session leaks.
+    """
+    db = None
     try:
-        # Test database connection
         from app.db.database import SessionLocal
+        from sqlalchemy import text
         db = SessionLocal()
-        db.execute("SELECT 1")
-        db.close()
+        db.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)}"
+    finally:
+        if db:
+            db.close()
     
     return {
         "status": "healthy" if db_status == "connected" else "unhealthy",
         "database": db_status,
         "database_type": "postgresql" if settings.is_postgres else "sqlite",
-        "cors_origins": settings.ALLOWED_ORIGINS,
         "environment": settings.ENVIRONMENT,
     }
 

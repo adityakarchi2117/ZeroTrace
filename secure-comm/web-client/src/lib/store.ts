@@ -27,6 +27,9 @@ import { playMessageSound, initAudioContext } from './sound';
 import { secureProfileService } from './secureProfileApi';
 import { deviceLinkService } from './deviceLinkService';
 import { LegacyMigrationHandler } from './encryptedVault';
+import { KeyHierarchyManager } from './keyManager';
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 
 interface AuthState {
   user: User | null;
@@ -174,25 +177,52 @@ export const useStore = create<AppState>()(
           }
 
           if (!keys) {
+            // === KEY RESTORATION ===
+            // CRITICAL FIX: Before generating new keys, try to restore from
+            // server backup. This prevents the bug where a new-device login
+            // overwrites the server's public key, permanently breaking
+            // decryption of all previous messages.
+            let restored = false;
 
-            console.log('🔐 Generating new key bundle...');
-            const { bundle, privateKeys } = generateKeyBundle(5);
+            if (user.public_key) {
+              // User already has keys on the server → existing user on a new device.
+              // Try to restore their full key bundle from the password-derived backup.
+              console.log('🔐 No local keys found. Attempting key restore from server backup...');
+              try {
+                restored = await deviceLinkService.restoreKeyBundle(username, password);
+                if (restored) {
+                  keys = KeyStorage.load(username);
+                  needsUpload = false; // Keys already match server — do NOT overwrite
+                  console.log('✅ Keys restored from server backup! Old messages will remain decryptable.');
+                }
+              } catch (restoreErr) {
+                console.warn('⚠️ Key restore from backup failed:', restoreErr);
+              }
+            }
 
-            keys = {
-              privateKey: privateKeys.signedPrekeyPrivate,
-              publicKey: bundle.publicKey,
-              identityKey: bundle.identityKey,
-              signedPrekey: bundle.signedPrekey,
-              signedPrekeySignature: bundle.signedPrekeySignature,
-              identityPrivateKey: privateKeys.identityPrivate,
-              oneTimePrekeys: bundle.oneTimePrekeys,
-            };
-            KeyStorage.save(username, keys);
-            needsUpload = true;
-            console.log('✅ Key bundle generated');
+            if (!restored) {
+              // Either a brand-new user (no server keys) OR backup restore failed.
+              // Generate fresh keys. For new users this is the correct initial flow.
+              // For existing users with a failed restore, this is a last resort.
+              console.log('🔐 Generating new key bundle...');
+              const { bundle, privateKeys } = generateKeyBundle(5);
+
+              keys = {
+                privateKey: privateKeys.signedPrekeyPrivate,
+                publicKey: bundle.publicKey,
+                identityKey: bundle.identityKey,
+                signedPrekey: bundle.signedPrekey,
+                signedPrekeySignature: bundle.signedPrekeySignature,
+                identityPrivateKey: privateKeys.identityPrivate,
+                oneTimePrekeys: bundle.oneTimePrekeys,
+              };
+              KeyStorage.save(username, keys);
+              needsUpload = true;
+              console.log('✅ Key bundle generated');
+            }
           }
 
-          if (keys.privateKey && keys.publicKey) {
+          if (keys && keys.privateKey && keys.publicKey) {
             const isValidPair = verifyKeyPair(keys.privateKey, keys.publicKey);
             console.log('🔑 Key pair verification:', isValidPair ? '✅ VALID' : '❌ INVALID');
 
@@ -264,16 +294,16 @@ export const useStore = create<AppState>()(
             token: response.access_token,
             isAuthenticated: true,
             isLoading: false,
-            privateKey: keys.privateKey || null,
-            publicKey: keys.publicKey || null,
-            identityKey: keys.identityKey || null,
+            privateKey: keys?.privateKey || null,
+            publicKey: keys?.publicKey || null,
+            identityKey: keys?.identityKey || null,
           });
 
           wsManager.connect(user.id.toString(), response.access_token);
 
-          if (!(window as any)._wsHandlersRegistered) {
+          if (!(window as any)._zerotraceWsHandlersRegistered) {
             setupWebSocketHandlers(get, set);
-            (window as any)._wsHandlersRegistered = true;
+            (window as any)._zerotraceWsHandlersRegistered = true;
           }
 
           // Load profile so display_name, avatar, bio etc. are available in state
@@ -305,6 +335,17 @@ export const useStore = create<AppState>()(
                 }
               })
               .catch(err => console.warn('⚠️ Device sync init error (non-fatal):', err));
+
+            // === KEY BACKUP ===
+            // Back up encryption keys to server using password-derived encryption.
+            // This ensures keys can be restored on a new device login,
+            // preventing the critical bug where new-device login loses old keys.
+            deviceLinkService.backupKeyBundle(username, password)
+              .then(ok => {
+                if (ok) console.log('🔐 Key bundle backed up to server');
+                else console.warn('⚠️ Key backup skipped (non-fatal)');
+              })
+              .catch(err => console.warn('⚠️ Key backup failed (non-fatal):', err));
           }
 
         } catch (error: any) {
@@ -334,8 +375,12 @@ export const useStore = create<AppState>()(
       },
 
       logout: () => {
+        // AUDIT FIX: Remove all WebSocket handlers before disconnect
+        // to prevent duplicate handlers on re-login
+        wsManager.removeAllHandlers();
         wsManager.disconnect();
-        (window as any)._wsHandlersRegistered = false;
+        // AUDIT FIX: Use consistent flag name
+        (window as any)._zerotraceWsHandlersRegistered = false;
         localStorage.removeItem('zerotrace_token');
         localStorage.removeItem('zerotrace_username');
         api.setToken(null);
@@ -386,15 +431,15 @@ export const useStore = create<AppState>()(
 
             if (user.settings) {
               try {
-                const existing = localStorage.getItem('cipherlink_appearance');
+                const existing = localStorage.getItem('zerotrace_appearance');
                 const localSettings = existing ? JSON.parse(existing) : {};
                 const newSettings = { ...localSettings, ...user.settings };
                 const newValue = JSON.stringify(newSettings);
 
-                localStorage.setItem('cipherlink_appearance', newValue);
+                localStorage.setItem('zerotrace_appearance', newValue);
 
                 window.dispatchEvent(new StorageEvent('storage', {
-                  key: 'cipherlink_appearance',
+                  key: 'zerotrace_appearance',
                   newValue: newValue,
                   storageArea: localStorage,
                   url: window.location.href
@@ -406,20 +451,25 @@ export const useStore = create<AppState>()(
 
             const keys = KeyStorage.load(username);
 
+            // BUGFIX: Only restore stored keys if no keys are currently in state.
+            // This prevents overwriting freshly rotated keys with stale stored keys.
+            const currentState = get();
+            const hasActiveKeys = currentState.privateKey && currentState.publicKey;
+
             set({
               user,
               token,
               isAuthenticated: true,
-              privateKey: keys?.privateKey || null,
-              publicKey: keys?.publicKey || null,
-              identityKey: keys?.identityKey || null,
+              privateKey: hasActiveKeys ? currentState.privateKey : (keys?.privateKey || null),
+              publicKey: hasActiveKeys ? currentState.publicKey : (keys?.publicKey || null),
+              identityKey: hasActiveKeys ? currentState.identityKey : (keys?.identityKey || null),
             });
 
             wsManager.connect(user.id.toString(), token);
 
-            if (!(window as any)._wsHandlersRegistered) {
+            if (!(window as any)._zerotraceWsHandlersRegistered) {
               setupWebSocketHandlers(get, set);
-              (window as any)._wsHandlersRegistered = true;
+              (window as any)._zerotraceWsHandlersRegistered = true;
             }
 
             // Initialize secure profile on session restore
@@ -583,6 +633,39 @@ export const useStore = create<AppState>()(
               contactPublicKey = contact?.public_key;
             }
 
+            // === SESSION KEY FALLBACK ===
+            // Fetch server-stored ECDH shared secrets (wrapped with DEK).
+            // These are used as fallback when normal decryption fails — e.g., when a
+            // contact regenerated their keys on a new device mid-conversation.
+            const currentUsername = user?.username;
+            const convId = currentUsername ? [currentUsername, username].sort().join(':') : null;
+            const sessionFallbackKeys: Uint8Array[] = [];
+
+            if (convId && currentUsername && KeyHierarchyManager.hasDEK(currentUsername)) {
+              try {
+                const serverKeys = await deviceLinkService.getAndUnwrapSessionKeys(currentUsername, convId);
+                if (serverKeys.length > 0) {
+                  serverKeys.forEach(sk => sessionFallbackKeys.push(sk.sessionKey));
+                  // Persist to localStorage so subsequent decryption passes don't need a server call
+                  const cacheKey = `zerotrace_conv_sks:${convId}`;
+                  const cached: string[] = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                  const newEntries = serverKeys.map(sk => encodeBase64(sk.sessionKey));
+                  const merged = cached.concat(newEntries.filter(e => !cached.includes(e)));
+                  localStorage.setItem(cacheKey, JSON.stringify(merged));
+                  console.log(`🔑 Loaded ${serverKeys.length} session key(s) from server for ${convId}`);
+                }
+              } catch {
+                // No session keys on server yet — try local cache
+                if (convId) {
+                  const cacheKey = `zerotrace_conv_sks:${convId}`;
+                  const cached: string[] = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                  cached.forEach(b64 => {
+                    try { sessionFallbackKeys.push(decodeBase64(b64)); } catch {}
+                  });
+                }
+              }
+            }
+
             for (const msg of messages) {
 
               if (msg.encrypted_content && !msg._decryptedContent) {
@@ -598,7 +681,27 @@ export const useStore = create<AppState>()(
                     ? { ...encryptedData, senderPublicKey: undefined }
                     : encryptedData;
 
-                  const decrypted = decryptMessage(encForDecrypt, contactPublicKey || '', privateKey);
+                  let decrypted = decryptMessage(encForDecrypt, contactPublicKey || '', privateKey);
+
+                  // === FALLBACK: Try server-stored ECDH session keys ===
+                  // Handles the case where the contact changed their key (new device) mid-conversation.
+                  // nacl.box.open.after() decrypts using a pre-computed ECDH shared secret,
+                  // which is exactly what wrapAndStoreSessionKey stored.
+                  if (!decrypted && sessionFallbackKeys.length > 0) {
+                    for (const sharedSecret of sessionFallbackKeys) {
+                      try {
+                        const ct = decodeBase64(encryptedData.ciphertext);
+                        const nn = decodeBase64(encryptedData.nonce);
+                        const result = nacl.box.open.after(ct, nn, sharedSecret);
+                        if (result) {
+                          decrypted = new TextDecoder().decode(result);
+                          console.log(`🔓 Decrypted via session key fallback (message ${msg.id})`);
+                          break;
+                        }
+                      } catch {}
+                    }
+                  }
+
                   msg._decryptedContent = decrypted;
                 } catch (e) {
                   console.warn('Failed to decrypt message:', msg.id, e);
@@ -733,18 +836,53 @@ export const useStore = create<AppState>()(
 
           sentMessage._decryptedContent = content;
 
-          const updatedMessages = new Map(get().messages);
-          const userMessages = updatedMessages.get(recipientUsername) || [];
-          const index = userMessages.findIndex(m => m.id === optimisticId);
-
-          if (index !== -1) {
-            userMessages[index] = sentMessage;
-          } else {
-            userMessages.push(sentMessage);
+          // === SESSION KEY STORAGE ===
+          // Store the ECDH shared secret (wrapped with DEK) on the server once per conversation.
+          // This lets any other device that has the DEK decrypt historical messages even if
+          // the contact's key changes later. Tracked via localStorage to avoid redundant uploads.
+          {
+            const sessionUser = get().user;
+            const sessionPrivKey = get().privateKey;
+            if (sessionUser && sessionPrivKey && recipientPublicKey) {
+              const convId = [sessionUser.username, recipientUsername].sort().join(':');
+              const trackKey = `zerotrace_sk_v:${convId}`;
+              if (!localStorage.getItem(trackKey)) {
+                try {
+                  const sharedSecret = nacl.box.before(
+                    decodeBase64(recipientPublicKey),
+                    decodeBase64(sessionPrivKey)
+                  );
+                  deviceLinkService.wrapAndStoreSessionKey(
+                    sessionUser.username,
+                    convId,
+                    sharedSecret,
+                    1,
+                  ).then(() => {
+                    localStorage.setItem(trackKey, Date.now().toString());
+                    console.log(`🔑 ECDH session key stored for ${convId}`);
+                  }).catch(err => console.warn('⚠️ Session key store failed (non-fatal):', err));
+                } catch (e) {
+                  console.warn('⚠️ Session key derivation failed:', e);
+                }
+              }
+            }
           }
 
-          updatedMessages.set(recipientUsername, userMessages);
-          set({ messages: updatedMessages });
+          // Use atomic updater + immutable array to prevent race & mutation bugs
+          set((prev) => {
+            const updatedMessages = new Map(prev.messages);
+            const userMessages = [...(updatedMessages.get(recipientUsername) || [])];
+            const index = userMessages.findIndex(m => m.id === optimisticId);
+
+            if (index !== -1) {
+              userMessages[index] = sentMessage;
+            } else {
+              userMessages.push(sentMessage);
+            }
+
+            updatedMessages.set(recipientUsername, userMessages);
+            return { messages: updatedMessages };
+          });
 
           try {
             await get().persistMessage(sentMessage);
@@ -776,10 +914,10 @@ export const useStore = create<AppState>()(
           console.error('Failed to send message:', error);
 
           const updatedMessages = new Map(get().messages);
-          const userMessages = updatedMessages.get(recipientUsername) || [];
+          const userMessages = [...(updatedMessages.get(recipientUsername) || [])];
           const index = userMessages.findIndex(m => m.id === optimisticId);
           if (index !== -1) {
-            userMessages[index].status = 'failed';
+            userMessages[index] = { ...userMessages[index], status: 'failed' };
             updatedMessages.set(recipientUsername, userMessages);
             set({ messages: updatedMessages });
           }
@@ -890,30 +1028,43 @@ export const useStore = create<AppState>()(
             }
           }
 
-          const newMessages = new Map(get().messages);
-          newMessages.set(senderUsername, [...currentMessages, message]);
-          set({ messages: newMessages });
+          // Use atomic updater to prevent race condition with concurrent writes
+          set((prev) => {
+            const atomicMessages = new Map(prev.messages);
+            atomicMessages.set(senderUsername, [...(atomicMessages.get(senderUsername) || []), message]);
+            return { messages: atomicMessages };
+          });
 
-          const convIndex = state.conversations.findIndex(c => c.username === senderUsername);
+          // Use fresh state to avoid race condition with concurrent conversation updates
+          const freshState = get();
+          const convIndex = freshState.conversations.findIndex(c => c.username === senderUsername);
           if (convIndex >= 0) {
-            const conversations = [...state.conversations];
-            const updatedConv = {
-              ...conversations[convIndex],
-              last_message_time: message.created_at,
-              last_message_preview: message._decryptedContent
-                ? (message.message_type === 'image' ? '📷 Image' : message._decryptedContent)
-                : '[Encrypted Message]',
-              unread_count: (conversations[convIndex].unread_count || 0) + 1
-            };
-            conversations[convIndex] = updatedConv;
-            set({ conversations });
+            // Atomic conversation update
+            set((prev) => {
+              const conversations = [...prev.conversations];
+              const idx = conversations.findIndex(c => c.username === senderUsername);
+              if (idx >= 0) {
+                conversations[idx] = {
+                  ...conversations[idx],
+                  last_message_time: message.created_at,
+                  last_message_preview: message._decryptedContent
+                    ? (message.message_type === 'image' ? '📷 Image' : message._decryptedContent)
+                    : '[Encrypted Message]',
+                  unread_count: (conversations[idx].unread_count || 0) + 1
+                };
+              }
+              return { conversations };
+            });
 
             get().persistMessage(message).catch(err =>
               console.error('❌ Failed to persist incoming message:', err)
             );
-            get().persistConversation(updatedConv).catch(err =>
-              console.error('❌ Failed to persist conversation for incoming message:', err)
-            );
+            const updatedConv = get().conversations.find(c => c.username === senderUsername);
+            if (updatedConv) {
+              get().persistConversation(updatedConv).catch(err =>
+                console.error('❌ Failed to persist conversation for incoming message:', err)
+              );
+            }
 
             initAudioContext();
             playMessageSound();
@@ -945,7 +1096,7 @@ export const useStore = create<AppState>()(
               unread_count: 1,
               is_online: false,
             };
-            set({ conversations: [newConversation, ...state.conversations] });
+            set({ conversations: [newConversation, ...get().conversations] });
 
             get().persistMessage(message).catch(err =>
               console.error('❌ Failed to persist incoming message:', err)
@@ -1107,14 +1258,17 @@ export const useStore = create<AppState>()(
 
         try {
 
-          const currentMessages = new Map(get().messages);
-          const convMessages = currentMessages.get(conversationUsername) || [];
           const messageIdKey = String(messageId);
           const normalizedMessageId = Number(messageId);
 
-          const updatedMessages = convMessages.filter(m => String(m.id) !== messageIdKey);
-          currentMessages.set(conversationUsername, updatedMessages);
-          set({ messages: currentMessages });
+          // Atomic state update to prevent race conditions
+          set((prev) => {
+            const currentMessages = new Map(prev.messages);
+            const convMessages = currentMessages.get(conversationUsername) || [];
+            const updatedMessages = convMessages.filter(m => String(m.id) !== messageIdKey);
+            currentMessages.set(conversationUsername, updatedMessages);
+            return { messages: currentMessages };
+          });
 
           if (Number.isFinite(normalizedMessageId)) {
             await localStorageManager.deleteMessage(normalizedMessageId);
@@ -1128,25 +1282,34 @@ export const useStore = create<AppState>()(
       deleteMessageForEveryone: async (messageId: number | string, conversationUsername: string) => {
 
         try {
-
-          const currentMessages = new Map(get().messages);
-          const convMessages = currentMessages.get(conversationUsername) || [];
           const messageIdKey = String(messageId);
           const normalizedMessageId = Number(messageId);
 
-          const updatedMessages = convMessages.map(m => {
-            if (String(m.id) === messageIdKey) {
-              return {
-                ...m,
-                _decryptedContent: null,
-                encrypted_content: JSON.stringify({ deleted: true }),
-                message_type: 'deleted',
-              };
-            }
-            return m;
+          // Prevent delete-for-everyone on unsent (optimistic) messages
+          if (normalizedMessageId < 0) {
+            console.warn('Cannot delete-for-everyone on unsent message, using delete-for-me instead');
+            await get().deleteMessageForMe(messageId, conversationUsername);
+            return;
+          }
+
+          // Atomically update local state
+          set((prev) => {
+            const currentMessages = new Map(prev.messages);
+            const convMessages = currentMessages.get(conversationUsername) || [];
+            const updatedMessages = convMessages.map(m => {
+              if (String(m.id) === messageIdKey) {
+                return {
+                  ...m,
+                  _decryptedContent: null,
+                  encrypted_content: JSON.stringify({ deleted: true }),
+                  message_type: 'deleted',
+                };
+              }
+              return m;
+            });
+            currentMessages.set(conversationUsername, updatedMessages);
+            return { messages: currentMessages };
           });
-          currentMessages.set(conversationUsername, updatedMessages);
-          set({ messages: currentMessages });
 
           if (Number.isFinite(normalizedMessageId)) {
             await localStorageManager.markMessageAsDeleted(normalizedMessageId);
@@ -1511,7 +1674,22 @@ export const useStore = create<AppState>()(
 
               messagesMap.set(username, messages);
             }
-            set({ messages: messagesMap });
+
+            // Merge with existing messages instead of replacing to prevent
+            // losing real-time messages that arrived during the sync
+            set((prev) => {
+              const merged = new Map(prev.messages);
+              const usernames = Array.from(messagesMap.keys());
+              for (const username of usernames) {
+                const serverMsgs = messagesMap.get(username) as Message[];
+                const existing = merged.get(username) || [];
+                const serverIds = new Set(serverMsgs.map(m => String(m.id)));
+                // Keep any local-only messages (optimistic sends, real-time arrivals) not on server
+                const localOnly = existing.filter(m => !serverIds.has(String(m.id)));
+                merged.set(username, [...serverMsgs, ...localOnly]);
+              }
+              return { messages: merged };
+            });
 
             console.log('✅ Sync completed successfully');
           }
@@ -1859,7 +2037,9 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
     const state = get();
     const removedUsername = data.removed_username || data.data?.removed_username;
     if (removedUsername && state.currentConversation === removedUsername) {
-      set({ currentConversation: null, messages: new Map() });
+      const updatedMessages = new Map(state.messages);
+      updatedMessages.delete(removedUsername);
+      set({ currentConversation: null, messages: updatedMessages });
     }
     window.dispatchEvent(new CustomEvent('contacts_sync', { detail: { reason: 'contact_removed_self', ...data } }));
   });
@@ -1913,6 +2093,20 @@ function setupWebSocketHandlers(get: () => AppState, set: (state: Partial<AppSta
       if (wasUpdated) {
         set({ messages: updatedMessagesMap });
       }
+    }
+  });
+
+  // BUGFIX: On WebSocket reconnection, re-fetch conversations to pick up
+  // any messages delivered while disconnected (reconnection gap)
+  wsManager.on('reconnected', () => {
+    console.log('🔄 WebSocket reconnected — syncing missed messages');
+    const state = get();
+    if (state.isAuthenticated && state.user) {
+      api.getConversations().then(conversations => {
+        set({ conversations });
+      }).catch(err => {
+        console.warn('⚠️ Failed to sync conversations after reconnect:', err);
+      });
     }
   });
 }

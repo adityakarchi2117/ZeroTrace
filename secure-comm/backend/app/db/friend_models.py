@@ -5,7 +5,7 @@ SQLAlchemy models for the friend system
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Enum, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import enum
 
 from app.db.database import Base
@@ -81,7 +81,7 @@ class FriendRequest(Base):
     @staticmethod
     def default_expiry():
         """Friend requests expire in 7 days"""
-        return datetime.utcnow() + timedelta(days=7)
+        return datetime.now(timezone.utc) + timedelta(days=7)
 
 
 class TrustedContact(Base):

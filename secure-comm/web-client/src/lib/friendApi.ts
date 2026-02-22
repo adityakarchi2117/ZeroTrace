@@ -287,30 +287,36 @@ class FriendApiClient {
 
 export const friendApi = new FriendApiClient();
 
-// Helper function to compute key fingerprint (client-side)
-export function computeKeyFingerprint(publicKey: string): string {
+/**
+ * AUDIT FIX: This function was returning a Promise<string> cast as string,
+ * making it always return "[object Promise]". Fixed to be properly async.
+ * Callers MUST await this function.
+ */
+export async function computeKeyFingerprint(publicKey: string): Promise<string> {
   // Remove PEM headers and whitespace
   let cleanKey = publicKey
     .replace('-----BEGIN PUBLIC KEY-----', '')
     .replace('-----END PUBLIC KEY-----', '')
     .replace(/\s/g, '');
 
-  // Create SHA-256 hash
+  // Create SHA-256 hash using Web Crypto API
   const encoder = new TextEncoder();
   const data = encoder.encode(cleanKey);
 
-  // Use Web Crypto API for hashing
-  return crypto.subtle.digest('SHA-256', data).then((hashBuffer) => {
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    // Take first 16 bytes and format as colon-separated hex
-    return hashArray
-      .slice(0, 16)
-      .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
-      .join(':');
-  }) as unknown as string;
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  // Take first 16 bytes and format as colon-separated hex
+  return hashArray
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+    .join(':');
 }
 
-// Synchronous version using a simple hash for display purposes
+/**
+ * AUDIT FIX: Improved sync fingerprint computation using a proper hash spread.
+ * Uses FNV-1a (32-bit) for better collision resistance than DJB2.
+ * Still not cryptographically secure, but suitable for display-only purposes.
+ */
 export function computeKeyFingerprintSync(publicKey: string): string {
   if (!publicKey) return '';
   
@@ -319,17 +325,25 @@ export function computeKeyFingerprintSync(publicKey: string): string {
     .replace('-----END PUBLIC KEY-----', '')
     .replace(/\s/g, '');
 
-  // Simple hash for display (use proper crypto for verification)
-  let hash = 0;
+  // FNV-1a 32-bit hash for better distribution than DJB2
+  let hash = 0x811c9dc5; // FNV offset basis
   for (let i = 0; i < cleanKey.length; i++) {
-    const char = cleanKey.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash ^= cleanKey.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // FNV prime
   }
   
-  // Convert to hex-like format
-  const hex = Math.abs(hash).toString(16).toUpperCase().padStart(32, '0');
-  return hex.match(/.{1,2}/g)?.slice(0, 16).join(':') || '';
+  // Extend to 64 bits by running a second pass with different seed
+  let hash2 = 0x1a47e90b;
+  for (let i = cleanKey.length - 1; i >= 0; i--) {
+    hash2 ^= cleanKey.charCodeAt(i);
+    hash2 = Math.imul(hash2, 0x01000193);
+  }
+  
+  // Combine into 8-byte (16 hex char) fingerprint
+  const hex1 = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  const hex2 = (hash2 >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  const hex = hex1 + hex2;
+  return hex.match(/.{1,2}/g)?.slice(0, 8).join(':') || '';
 }
 
 // Format fingerprint for display (shorter version)

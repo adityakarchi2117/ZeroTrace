@@ -12,10 +12,7 @@ import {
   UserMinus,
   Shield,
   ShieldCheck,
-  Key,
   Copy,
-  Bell,
-  BellOff,
   AlertTriangle,
   Loader2,
   Check,
@@ -144,6 +141,7 @@ export default function ProfileActionsMenu({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+        title="More actions"
       >
         <MoreVertical className="w-5 h-5" />
       </button>

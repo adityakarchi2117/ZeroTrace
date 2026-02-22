@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -6,12 +6,20 @@ from app.db.database import get_db, RefreshToken
 from app.db.user_repo import UserRepository
 from app.core.security import verify_password, create_access_token, get_password_hash, oauth2_scheme
 from app.models.user import UserCreate, UserResponse, Token, UserSettingsUpdate
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from app.core.config import settings
+from app.core.crypto import RateLimiter
 from pydantic import BaseModel
+import asyncio
 import re
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# AUDIT FIX: Rate limiters for auth endpoints to prevent brute-force attacks
+_login_limiter = RateLimiter()
+_register_limiter = RateLimiter()
 
 # Request/Response models for account management
 class UsernameChangeRequest(BaseModel):
@@ -32,8 +40,16 @@ class AccountStatusResponse(BaseModel):
     message: str
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user: UserCreate, db: Session = Depends(get_db)):
+async def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
+    # AUDIT FIX: Rate limit registration by IP to prevent spam
+    client_ip = request.client.host if request.client else "unknown"
+    if not _register_limiter.check_rate_limit(f"register:{client_ip}", max_attempts=5, window_seconds=300):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Try again later."
+        )
+    
     user_repo = UserRepository(db)
     
     # Check if user already exists
@@ -49,20 +65,30 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
-    # Create new user
-    hashed_password = get_password_hash(user.password)
+    # AUDIT FIX: Run blocking bcrypt in thread pool to avoid blocking event loop
+    hashed_password = await asyncio.to_thread(get_password_hash, user.password)
     new_user = user_repo.create(user.username, user.email, hashed_password)
     
     return new_user
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None, db: Session = Depends(get_db)):
     """Login and get access token."""
+    # AUDIT FIX: Rate limit login by IP+username to prevent brute-force
+    client_ip = request.client.host if request and request.client else "unknown"
+    rate_key = f"login:{client_ip}:{form_data.username}"
+    if not _login_limiter.check_rate_limit(rate_key, max_attempts=10, window_seconds=300):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in a few minutes."
+        )
+    
     try:
         user_repo = UserRepository(db)
         user = user_repo.get_by_username(form_data.username)
         
-        if not user or not verify_password(form_data.password, user.hashed_password):
+        # AUDIT FIX: Run blocking bcrypt in thread pool
+        if not user or not await asyncio.to_thread(verify_password, form_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
@@ -83,6 +109,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
                 detail="Account has been deleted."
             )
         
+        # AUDIT FIX: Reset rate limiter on successful login
+        _login_limiter.reset(rate_key)
+        
         access_token = create_access_token(
             data={"sub": user.username, "user_id": user.id},
             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -96,11 +125,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Login error: {e}", exc_info=True)
+        # AUDIT FIX: Never leak internal error details to client
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
+            detail="Login failed due to a server error. Please try again."
         )
 
 @router.get("/me", response_model=UserResponse)
@@ -199,8 +228,8 @@ async def change_username(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Verify password
-    if not verify_password(request.password, user.hashed_password):
+    # Verify password (AUDIT FIX: use to_thread to avoid blocking event loop with bcrypt)
+    if not await asyncio.to_thread(verify_password, request.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Incorrect password")
     
     # Validate new username format
@@ -219,7 +248,7 @@ async def change_username(
     # Check 14-day cooldown
     last_change = getattr(user, 'last_username_change', None)
     if last_change:
-        days_since_change = (datetime.utcnow() - last_change).days
+        days_since_change = (datetime.now(timezone.utc) - last_change).days
         if days_since_change < 14:
             days_remaining = 14 - days_since_change
             raise HTTPException(
@@ -231,20 +260,20 @@ async def change_username(
     previous_usernames = list(getattr(user, 'previous_usernames', None) or [])
     previous_usernames.append({
         "username": user.username,
-        "changed_at": datetime.utcnow().isoformat()
+        "changed_at": datetime.now(timezone.utc).isoformat()
     })
     
     # Update username
     old_username = user.username
     user.username = new_username
-    user.last_username_change = datetime.utcnow()
+    user.last_username_change = datetime.now(timezone.utc)
     user.previous_usernames = previous_usernames.copy()
     flag_modified(user, 'previous_usernames')
     
     db.commit()
     db.refresh(user)
     
-    next_change = datetime.utcnow() + timedelta(days=14)
+    next_change = datetime.now(timezone.utc) + timedelta(days=14)
     
     return UsernameChangeResponse(
         success=True,
@@ -273,13 +302,13 @@ async def disable_account(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Verify password
-    if not verify_password(request.password, user.hashed_password):
+    # Verify password (AUDIT FIX: use to_thread to avoid blocking event loop with bcrypt)
+    if not await asyncio.to_thread(verify_password, request.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Incorrect password")
     
     # Disable account
     user.is_disabled = True
-    user.disabled_at = datetime.utcnow()
+    user.disabled_at = datetime.now(timezone.utc)
     
     # Revoke all refresh tokens to invalidate sessions immediately
     db.query(RefreshToken).filter(
@@ -324,7 +353,8 @@ async def reactivate_account(
     user_repo = UserRepository(db)
     user = user_repo.get_by_username(form_data.username)
     
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    # AUDIT FIX: use to_thread to avoid blocking event loop with bcrypt
+    if not user or not await asyncio.to_thread(verify_password, form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -375,12 +405,12 @@ async def delete_account(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Verify password
-    if not verify_password(request.password, user.hashed_password):
+    # Verify password (AUDIT FIX: use to_thread to avoid blocking event loop with bcrypt)
+    if not await asyncio.to_thread(verify_password, request.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Incorrect password")
     
     # Mark account for deletion (soft delete)
-    user.deleted_at = datetime.utcnow()
+    user.deleted_at = datetime.now(timezone.utc)
     user.is_active = False
     user.is_disabled = True
     
@@ -426,7 +456,7 @@ async def get_account_status(
     days_until_change = 0
     
     if last_change:
-        days_since_change = (datetime.utcnow() - last_change).days
+        days_since_change = (datetime.now(timezone.utc) - last_change).days
         if days_since_change < 14:
             can_change_username = False
             days_until_change = 14 - days_since_change

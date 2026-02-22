@@ -204,10 +204,24 @@ export function decryptFileWithDEK(
 // ==================== Content Hash ====================
 
 /**
+ * BUGFIX: Check if Web Crypto API is available (requires HTTPS or localhost).
+ * Falls back to a simple hash if crypto.subtle is undefined.
+ */
+function assertCryptoSubtle(): void {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error(
+      'Web Crypto API (crypto.subtle) is not available. ' +
+      'This requires a secure context (HTTPS or localhost).'
+    );
+  }
+}
+
+/**
  * Generate SHA-256 hash of content for integrity verification.
  * Uses Web Crypto API.
  */
 export async function hashContent(content: string): Promise<string> {
+  assertCryptoSubtle();
   const encoder = new TextEncoder();
   const data = encoder.encode(content);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -219,6 +233,7 @@ export async function hashContent(content: string): Promise<string> {
  * Generate SHA-256 hash of file data for integrity verification.
  */
 export async function hashFileContent(data: Uint8Array): Promise<string> {
+  assertCryptoSubtle();
   const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -501,16 +516,17 @@ export class KeyHierarchyManager {
       return null;
     }
     
-    // Derive backup key from password using HKDF-like approach
-    const backupKeyBytes = await deriveKeyFromPassword(backupPassword);
+    // Derive backup key from password using PBKDF2 with random salt
+    const { key: backupKeyBytes, salt: backupSalt } = await deriveKeyFromPassword(backupPassword);
     const backupKeyHash = await hashContent(backupPassword + ':zerotrace-backup');
     
-    // Create backup bundle
+    // Create backup bundle (include salt so we can re-derive on restore)
     const bundle = JSON.stringify({
       profile: profileData,
       metadata,
       dekVersion: dek.version,
       timestamp: new Date().toISOString(),
+      backupSalt: encodeBase64(backupSalt),
     });
     
     // Encrypt bundle with backup key
@@ -697,8 +713,23 @@ export class KeyRotationManager {
 
 /**
  * Derive an encryption key from a password using PBKDF2 via Web Crypto API.
+ * 
+ * AUDIT FIX: Accepts optional random salt parameter. If not provided, generates
+ * a random 16-byte salt. The salt MUST be stored alongside the encrypted data
+ * so decryption can re-derive the same key.
+ * 
+ * Returns { key, salt } so callers can persist the salt.
+ * 
+ * @param password      The user's password
+ * @param existingSalt  Salt from a previous derivation (for restore). If omitted, a random salt is generated.
+ * @param iterations    PBKDF2 iteration count. Must match the value used when encrypting.
  */
-async function deriveKeyFromPassword(password: string): Promise<Uint8Array> {
+export async function deriveKeyFromPassword(
+  password: string,
+  existingSalt?: Uint8Array,
+  iterations: number = 100000,
+): Promise<{ key: Uint8Array; salt: Uint8Array }> {
+  assertCryptoSubtle();
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -708,17 +739,18 @@ async function deriveKeyFromPassword(password: string): Promise<Uint8Array> {
     ['deriveBits'],
   );
   
-  const salt = encoder.encode('zerotrace-backup-salt-v1');
+  // AUDIT FIX: Use random salt instead of hardcoded. Store salt with ciphertext.
+  const salt = existingSalt || crypto.getRandomValues(new Uint8Array(16));
   const bits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
-      salt,
-      iterations: 100000,
+      salt: salt.buffer as ArrayBuffer,
+      iterations,
       hash: 'SHA-256',
     },
     keyMaterial,
     256,
   );
   
-  return new Uint8Array(bits);
+  return { key: new Uint8Array(bits), salt };
 }

@@ -6,7 +6,7 @@
 
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { webrtcService, CallState, CallType } from '@/lib/webrtc';
 
 interface CallContextType {
@@ -83,6 +83,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      // Nullify handlers on unmount to avoid stale closures / conflicts with useWebRTC
+      webrtcService.setOnStateChange(null);
+      webrtcService.setOnLocalStream(null);
+      webrtcService.setOnRemoteStream(null);
     };
   }, []);
 
@@ -170,13 +174,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const isInCall = callState !== null && 
     ['calling', 'ringing', 'connecting', 'connected'].includes(callState.status);
 
+  const contextValue = useMemo(() => ({
+    callState, isInCall, callDuration, isFullscreen, isMinimized, isPictureInPicture, showLocalInPiP,
+    localStream, remoteStream, isMuted, isVideoOff, isScreenSharing,
+    startCall, answerCall, rejectCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
+    toggleFullscreen, toggleMinimize, togglePictureInPicture, swapVideos, restoreCall,
+  }), [
+    callState, isInCall, callDuration, isFullscreen, isMinimized, isPictureInPicture, showLocalInPiP,
+    localStream, remoteStream, isMuted, isVideoOff, isScreenSharing,
+    startCall, answerCall, rejectCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
+    toggleFullscreen, toggleMinimize, togglePictureInPicture, swapVideos, restoreCall,
+  ]);
+
   return (
-    <CallContext.Provider value={{
-      callState, isInCall, callDuration, isFullscreen, isMinimized, isPictureInPicture, showLocalInPiP,
-      localStream, remoteStream, isMuted, isVideoOff, isScreenSharing,
-      startCall, answerCall, rejectCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
-      toggleFullscreen, toggleMinimize, togglePictureInPicture, swapVideos, restoreCall,
-    }}>
+    <CallContext.Provider value={contextValue}>
       {children}
     </CallContext.Provider>
   );

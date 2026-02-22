@@ -7,7 +7,7 @@ Handles DEKs, encrypted profiles, encrypted pictures, metadata, backups, and key
 
 import hashlib
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import Session
@@ -114,7 +114,7 @@ class SecureProfileRepository:
         # Deactivate current
         if current:
             current.is_active = False
-            current.rotated_at = datetime.utcnow()
+            current.rotated_at = datetime.now(timezone.utc)
 
         # Store new wrapped DEK
         new_dek = DataEncryptionKey(

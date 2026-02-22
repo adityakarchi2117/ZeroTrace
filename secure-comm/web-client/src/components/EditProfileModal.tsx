@@ -41,8 +41,8 @@ export default function EditProfileModal({
   const [activeTab, setActiveTab] = useState<'details' | 'social' | 'appearance'>('details');
 
   useEffect(() => {
-    if (profile) setForm(profile);
-  }, [profile]);
+    if (isOpen && profile) setForm(profile);
+  }, [isOpen, profile]);
 
   if (!isOpen) return null;
 

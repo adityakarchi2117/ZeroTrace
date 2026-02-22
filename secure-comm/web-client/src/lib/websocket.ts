@@ -28,17 +28,27 @@ export interface TypingIndicator {
   is_typing: boolean;
 }
 
+/**
+ * AUDIT FIXES:
+ * - Added MAX_QUEUE_SIZE to prevent unbounded message queue growth
+ * - Added removeAllHandlers() for proper cleanup on logout
+ * - Fixed reconnection to not trigger on intentional disconnect
+ */
+const MAX_QUEUE_SIZE = 100;
+
 class WebSocketManager {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null; // AUDIT FIX: Track reconnect timer
   private messageHandlers: Map<string, Set<(data: any) => void>> = new Map();
   private userId: string | null = null;
   private token: string | null = null;
   private isConnecting = false;
   private messageQueue: WebSocketMessage[] = [];
+  private intentionalDisconnect = false;
 
   constructor() {
     // Don't auto-connect in constructor
@@ -47,6 +57,7 @@ class WebSocketManager {
   connect(userId: string, token: string) {
     this.userId = userId;
     this.token = token;
+    this.intentionalDisconnect = false; // AUDIT FIX: Reset on new connect
     this.connectWebSocket();
   }
 
@@ -73,6 +84,13 @@ class WebSocketManager {
         this.reconnectAttempts = 0;
         this.startHeartbeat();
 
+        // BUGFIX: Notify handlers of reconnection so they can re-sync state
+        // (e.g., re-fetch pending messages that may have arrived while disconnected)
+        const reconnectHandlers = this.messageHandlers.get('reconnected');
+        if (reconnectHandlers) {
+          reconnectHandlers.forEach(h => { try { h({ type: 'reconnected' }); } catch {} });
+        }
+
         // Send any queued messages
         this.flushMessageQueue();
       };
@@ -90,7 +108,10 @@ class WebSocketManager {
         console.log('🔌 WebSocket disconnected:', event.code, event.reason);
         this.isConnecting = false;
         this.stopHeartbeat();
-        this.attemptReconnect();
+        // AUDIT FIX: Don't reconnect if disconnect was intentional (logout)
+        if (!this.intentionalDisconnect) {
+          this.attemptReconnect();
+        }
       };
 
       this.ws.onerror = (error) => {
@@ -106,8 +127,14 @@ class WebSocketManager {
   }
 
   private attemptReconnect() {
+    if (this.intentionalDisconnect) return; // AUDIT FIX: Respect intentional disconnect
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
+      // AUDIT FIX: Notify handlers that connection is permanently lost
+      const handlers = this.messageHandlers.get('connection_lost');
+      if (handlers) {
+        handlers.forEach(h => { try { h({ type: 'connection_lost' }); } catch {} });
+      }
       return;
     }
 
@@ -116,14 +143,30 @@ class WebSocketManager {
 
     console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
-    setTimeout(() => {
-      this.connectWebSocket();
+    // AUDIT FIX: Store timer reference so we can cancel on intentional disconnect
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.intentionalDisconnect) {
+        this.connectWebSocket();
+      }
     }, delay);
   }
 
+  private lastPongReceived: number = Date.now();
+  private pongTimeoutMs: number = 45000; // 45s — must be > ping interval (30s)
+
   private startHeartbeat() {
+    this.lastPongReceived = Date.now();
     this.heartbeatInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
+        // Check if we received a pong since last ping
+        const elapsed = Date.now() - this.lastPongReceived;
+        if (elapsed > this.pongTimeoutMs) {
+          console.warn(`⚠️ No pong received for ${elapsed}ms — connection is dead, forcing reconnect`);
+          try { this.ws?.close(4000, 'Pong timeout'); } catch (_) {}
+          this.attemptReconnect();
+          return;
+        }
         this.send({
           type: 'ping',
           data: {},
@@ -142,6 +185,12 @@ class WebSocketManager {
 
   private handleMessage(message: any) {
     const type = message.type;
+
+    // Track pong responses for dead-connection detection
+    if (type === 'pong') {
+      this.lastPongReceived = Date.now();
+    }
+
     const handlers = this.messageHandlers.get(type);
 
     if (handlers && handlers.size > 0) {
@@ -172,9 +221,13 @@ class WebSocketManager {
       console.log(`📤 Sending ${message.type} message:`, message);
       this.ws.send(JSON.stringify(message));
     } else {
-      // Queue message for later
+      // AUDIT FIX: Enforce max queue size to prevent unbounded memory growth
+      if (this.messageQueue.length >= MAX_QUEUE_SIZE) {
+        console.warn(`⚠️ Message queue full (${MAX_QUEUE_SIZE}), dropping oldest message`);
+        this.messageQueue.shift();
+      }
       this.messageQueue.push(message);
-      console.warn(`⏳ WebSocket not connected (state: ${this.ws?.readyState}), queuing ${message.type} message`);
+      console.warn(`⏳ WebSocket not connected (state: ${this.ws?.readyState}), queuing ${message.type} message (${this.messageQueue.length}/${MAX_QUEUE_SIZE})`);
 
       // Try to reconnect if not connecting
       if (!this.isConnecting && this.userId && this.token) {
@@ -313,7 +366,15 @@ class WebSocketManager {
   }
 
   disconnect() {
+    this.intentionalDisconnect = true; // AUDIT FIX: Prevent auto-reconnect
     this.stopHeartbeat();
+    
+    // AUDIT FIX: Cancel any pending reconnect timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
     this.updatePresence(false);
 
     if (this.ws) {
@@ -322,6 +383,18 @@ class WebSocketManager {
     }
 
     this.messageQueue = [];
+    this.reconnectAttempts = 0;
+    // AUDIT FIX: Clear token reference on disconnect to prevent stale token retention
+    this.token = null;
+    this.userId = null;
+  }
+
+  /**
+   * AUDIT FIX: Remove all registered handlers.
+   * Must be called on logout to prevent duplicate handlers on re-login.
+   */
+  removeAllHandlers() {
+    this.messageHandlers.clear();
   }
 
   isConnected(): boolean {
@@ -337,11 +410,26 @@ class WebSocketManager {
 export const wsManager = new WebSocketManager();
 
 // Auto-disconnect on page unload
+// AUDIT FIX: Set intentionalDisconnect flag via disconnect() to prevent
+// reconnect timers from firing during unload
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
     wsManager.updatePresence(false);
     wsManager.disconnect();
   });
+
+  // AUDIT FIX: Resume AudioContext on first user interaction for browsers
+  // that require a user gesture (Chrome's autoplay policy)
+  const resumeAudioOnGesture = () => {
+    try {
+      const { initAudioContext } = require('./sound');
+      initAudioContext();
+    } catch (_) {}
+    window.removeEventListener('click', resumeAudioOnGesture);
+    window.removeEventListener('keydown', resumeAudioOnGesture);
+  };
+  window.addEventListener('click', resumeAudioOnGesture, { once: true });
+  window.addEventListener('keydown', resumeAudioOnGesture, { once: true });
 
   // Update presence on visibility change
   document.addEventListener('visibilitychange', () => {

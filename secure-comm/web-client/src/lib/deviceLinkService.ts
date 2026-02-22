@@ -17,7 +17,7 @@
  */
 
 import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { api as apiClient } from './api';
 import { KeyStorage, generateFingerprint } from './crypto';
 import {
@@ -25,6 +25,7 @@ import {
   encryptWithDEK, decryptWithDEK,
   KeyHierarchyManager,
   DEKBundle,
+  deriveKeyFromPassword,
 } from './keyManager';
 
 // ==================== Types ====================
@@ -140,8 +141,11 @@ class DeviceLinkApi {
     deviceType: string = 'web',
     devicePublicKey: string = '',
   ): Promise<DeviceInfo> {
-    const response = await this.http.post('/api/device/register', null, {
-      params: { device_id: deviceId, device_name: deviceName, device_type: deviceType, device_public_key: devicePublicKey },
+    const response = await this.http.post('/api/device/register', {
+      device_id: deviceId,
+      device_name: deviceName,
+      device_type: deviceType,
+      device_public_key: devicePublicKey,
     });
     return response.data;
   }
@@ -237,8 +241,11 @@ class DeviceLinkApi {
     wrapNonce: string,
     dekVersion: number,
   ): Promise<any> {
-    const response = await this.http.post('/api/device/wrapped', null, {
-      params: { device_id: deviceId, wrapped_dek: wrappedDek, wrap_nonce: wrapNonce, dek_version: dekVersion },
+    const response = await this.http.post('/api/device/wrapped', {
+      device_id: deviceId,
+      wrapped_dek: wrappedDek,
+      wrap_nonce: wrapNonce,
+      dek_version: dekVersion,
     });
     return response.data;
   }
@@ -298,6 +305,57 @@ class DeviceLinkApi {
       new_dek_version: newDekVersion,
       rewrapped_keys: rewrappedKeys,
     });
+    return response.data;
+  }
+
+  // ── Recovery Backup (Password-Derived Key Backup) ──
+
+  /**
+   * Check whether the user has an active recovery backup on the server.
+   */
+  async checkRecoveryStatus(): Promise<{ has_recovery_backup: boolean }> {
+    const response = await this.http.get('/api/device/keys/recovery/status');
+    return response.data;
+  }
+
+  /**
+   * Fetch the encrypted recovery backup (encrypted key bundle + KDF params).
+   * The caller must derive the key from the user's password using the returned
+   * KDF params, then decrypt locally.
+   */
+  async getRecoveryBackup(): Promise<{
+    encrypted_dek: string;
+    encryption_nonce: string;
+    encryption_algorithm: string;
+    kdf_salt: string;
+    kdf_algorithm: string;
+    kdf_iterations: number;
+    kdf_memory: number | null;
+    kdf_parallelism: number | null;
+    dek_version: number;
+    created_at: string;
+  }> {
+    const response = await this.http.get('/api/device/keys/recovery/backup');
+    return response.data;
+  }
+
+  /**
+   * Store an encrypted recovery backup on the server.
+   * The encrypted blob contains the full key bundle encrypted with a
+   * password-derived key. Server never sees plaintext keys.
+   */
+  async storeRecoveryBackup(data: {
+    encrypted_dek: string;
+    encryption_nonce: string;
+    encryption_algorithm: string;
+    kdf_salt: string;
+    kdf_algorithm: string;
+    kdf_iterations: number;
+    kdf_memory?: number | null;
+    kdf_parallelism?: number | null;
+    dek_version: number;
+  }): Promise<any> {
+    const response = await this.http.post('/api/device/keys/recovery/backup', data);
     return response.data;
   }
 }
@@ -808,6 +866,162 @@ export class DeviceLinkService {
     }
 
     return 0;
+  }
+
+  // ── Key Bundle Backup & Restore (Password-Derived) ──
+
+  /**
+   * Back up the FULL encryption key bundle to the server.
+   *
+   * Flow:
+   *   1. Load all keys (X25519 + Ed25519 + DEK) from local storage
+   *   2. Derive an encryption key from the user's password (PBKDF2)
+   *   3. Encrypt the key bundle with the derived key (NaCl secretbox)
+   *   4. Upload the encrypted blob + KDF params to the server
+   *
+   * The server NEVER sees any plaintext key material.
+   * On a new device, the user's password is used to re-derive the
+   * same key and decrypt the bundle, restoring full crypto access.
+   */
+  async backupKeyBundle(username: string, password: string): Promise<boolean> {
+    try {
+      const keys = KeyStorage.load(username);
+      if (!keys || !keys.privateKey) {
+        console.warn('⚠️ No keys to backup');
+        return false;
+      }
+
+      const dek = KeyHierarchyManager.getDEK(username);
+
+      // Create composite bundle containing ALL key material
+      // (never sent to server in plaintext — encrypted below)
+      const bundle = JSON.stringify({
+        version: 1,
+        type: 'full_key_backup',
+        keys: {
+          privateKey: keys.privateKey,
+          publicKey: keys.publicKey,
+          identityKey: keys.identityKey,
+          identityPrivateKey: keys.identityPrivateKey,
+          signedPrekey: keys.signedPrekey,
+          signedPrekeySignature: keys.signedPrekeySignature,
+          oneTimePrekeys: keys.oneTimePrekeys,
+          fingerprint: keys.fingerprint,
+        },
+        dek: dek
+          ? { plaintextDEK: dek.plaintextDEK, version: dek.version }
+          : null,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Derive encryption key from the user's password
+      const { key, salt } = await deriveKeyFromPassword(password);
+
+      // Encrypt the bundle with the password-derived key
+      const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+      const bundleBytes = decodeUTF8(bundle);
+      const encrypted = nacl.secretbox(bundleBytes, nonce, key);
+
+      // Upload encrypted blob to server
+      await this.api.storeRecoveryBackup({
+        encrypted_dek: encodeBase64(encrypted),
+        encryption_nonce: encodeBase64(nonce),
+        encryption_algorithm: 'xsalsa20-poly1305',
+        kdf_salt: encodeBase64(salt),
+        kdf_algorithm: 'pbkdf2-sha256',
+        kdf_iterations: 100000,
+        dek_version: dek?.version || 1,
+      });
+
+      console.log('🔐 Full key bundle backed up to server (encrypted with password)');
+      return true;
+    } catch (err) {
+      console.error('❌ Key bundle backup failed:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Restore encryption keys from a server-side backup.
+   *
+   * Flow:
+   *   1. Check if a recovery backup exists on the server
+   *   2. Fetch the encrypted blob + KDF params
+   *   3. Re-derive the encryption key from the user's password
+   *   4. Decrypt the bundle → get all key material
+   *   5. Save keys to local storage
+   *
+   * This is called during login when the user has no local keys
+   * but the server shows they are an existing user (has public_key).
+   * By restoring instead of regenerating, old messages remain decryptable.
+   */
+  async restoreKeyBundle(username: string, password: string): Promise<boolean> {
+    try {
+      // 1. Check if a backup exists
+      const status = await this.api.checkRecoveryStatus();
+      if (!status.has_recovery_backup) {
+        console.log('ℹ️ No recovery backup found on server — cannot restore keys');
+        return false;
+      }
+
+      // 2. Fetch encrypted backup + KDF params
+      const backup = await this.api.getRecoveryBackup();
+
+      // 3. Re-derive key from password using the stored KDF parameters
+      const salt = decodeBase64(backup.kdf_salt);
+      const iterations = backup.kdf_iterations || 100000;
+      const { key } = await deriveKeyFromPassword(password, salt, iterations);
+
+      // 4. Decrypt the bundle
+      const encrypted = decodeBase64(backup.encrypted_dek);
+      const nonce = decodeBase64(backup.encryption_nonce);
+      const decrypted = nacl.secretbox.open(encrypted, nonce, key);
+
+      if (!decrypted) {
+        console.error('❌ Key backup decryption failed — password may have changed since backup');
+        return false;
+      }
+
+      const bundle = JSON.parse(encodeUTF8(decrypted));
+
+      // 5. Validate bundle format
+      if (bundle.type !== 'full_key_backup' || !bundle.keys?.privateKey) {
+        console.error('❌ Invalid backup bundle format:', bundle.type);
+        return false;
+      }
+
+      // 6. Restore encryption keys to localStorage
+      KeyStorage.save(username, bundle.keys);
+
+      // 7. Restore DEK if present in the backup
+      if (bundle.dek?.plaintextDEK) {
+        const pubKeyBytes = decodeBase64(bundle.keys.publicKey);
+        const privKeyBytes = decodeBase64(bundle.keys.privateKey);
+        const dekBytes = decodeBase64(bundle.dek.plaintextDEK);
+
+        // Re-wrap DEK with the restored key pair (for local cache)
+        const wrapResult = wrapDEK(dekBytes, pubKeyBytes, privKeyBytes);
+
+        KeyHierarchyManager.saveDEKLocally(username, {
+          plaintextDEK: bundle.dek.plaintextDEK,
+          wrappedDEK: wrapResult.wrappedDEK,
+          wrapNonce: wrapResult.nonce,
+          version: bundle.dek.version,
+          algorithm: 'x25519-xsalsa20-poly1305',
+        });
+        console.log(`🔓 DEK restored from backup (v${bundle.dek.version})`);
+      }
+
+      console.log('✅ Full key bundle restored from server backup');
+      return true;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        console.log('ℹ️ No recovery backup found on server');
+        return false;
+      }
+      console.error('❌ Key bundle restore failed:', err);
+      return false;
+    }
   }
 
   // ── Helpers ──

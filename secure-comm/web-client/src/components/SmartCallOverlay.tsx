@@ -8,7 +8,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 const ElectricBorder = dynamic(() => import('./ElectricBorder'), { ssr: false });
 
@@ -157,6 +157,7 @@ export function SmartCallOverlay({
                     onEndCall();
                   }}
                   className="p-2.5 bg-red-500 hover:bg-red-600 rounded-full transition-colors"
+                  title="End call"
                 >
                   <PhoneOff className="w-5 h-5 text-white" />
                 </button>

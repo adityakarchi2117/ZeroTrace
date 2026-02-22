@@ -119,6 +119,7 @@ export default function ProfilePage({ onClose }: ProfilePageProps) {
             <button
               onClick={onClose}
               className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors"
+              title="Close"
             >
               <X className="w-5 h-5" />
             </button>

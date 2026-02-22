@@ -133,7 +133,7 @@ export default function ContactProfilePopup({
                   <div className="mt-4 flex items-center justify-center gap-2 flex-wrap text-center">
                     {profile?.emoji_badge && <span className="text-lg">{profile.emoji_badge}</span>}
                     {profile?.verification_badges && profile.verification_badges.length > 0 && (
-                      <span className="text-green-400 text-sm" title="Verified">?</span>
+                      <span className="text-green-400 text-sm" title="Verified">✓</span>
                     )}
                     {profile?.is_friend && (
                       <span className="text-xs bg-green-500/10 text-green-300 px-2 py-0.5 rounded-full border border-green-500/20">

@@ -9,7 +9,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -86,7 +86,7 @@ def test_users(db_session):
         email="alice@test.com",
         password_hash="hashed_password",
         public_key="test_public_key_alice_1234567890",
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     user2 = User(
         user_id=2,
@@ -94,7 +94,7 @@ def test_users(db_session):
         email="bob@test.com",
         password_hash="hashed_password",
         public_key="test_public_key_bob_0987654321",
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     user3 = User(
         user_id=3,
@@ -102,7 +102,7 @@ def test_users(db_session):
         email="charlie@test.com",
         password_hash="hashed_password",
         public_key="test_public_key_charlie_5555555555",
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     
     db_session.add_all([user1, user2, user3])
@@ -404,7 +404,7 @@ class TestFriendRepository:
         )
         
         # Manually set expiry to past
-        request.expires_at = datetime.utcnow() - timedelta(hours=1)
+        request.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
         db_session.commit()
         
         # Try to accept expired request

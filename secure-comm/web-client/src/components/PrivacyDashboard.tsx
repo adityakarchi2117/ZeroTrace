@@ -6,7 +6,7 @@ import {
 } from "@/lib/profileTypes";
 import VisibilitySelector from "./VisibilitySelector";
 import profileApi from "@/lib/profileApi";
-import { Shield, Eye, MessageSquare, Search, Download } from "lucide-react";
+import { Shield, Eye, MessageSquare, Download } from "lucide-react";
 
 interface Props {
   settings: PrivacySettings | null;
@@ -108,7 +108,8 @@ export default function PrivacyDashboard({
             </div>
             <button
               role="switch"
-              aria-checked={settings.discovery_opt_in}
+              aria-checked={settings.discovery_opt_in ? "true" : "false"}
+              title="Toggle discoverability"
               onClick={() => update("discovery_opt_in", !settings.discovery_opt_in)}
               className={`relative w-11 h-6 rounded-full transition-colors ${
                 settings.discovery_opt_in ? 'bg-indigo-500' : 'bg-gray-700'

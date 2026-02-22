@@ -133,6 +133,7 @@ export function WallpaperSettings() {
           className={`relative w-14 h-7 rounded-full transition-colors ${
             wallpaper.enabled ? 'bg-cyan-500' : 'bg-gray-600'
           }`}
+          title="Toggle wallpaper"
         >
           <motion.div
             animate={{ x: wallpaper.enabled ? 28 : 4 }}

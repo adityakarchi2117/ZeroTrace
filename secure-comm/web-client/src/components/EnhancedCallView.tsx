@@ -16,7 +16,7 @@ import { useWindowFocus } from '@/hooks/useWindowFocus';
 import {
   Phone, PhoneOff, Mic, MicOff, Video, VideoOff,
   Monitor, Maximize2, Minimize2, PictureInPicture,
-  RefreshCw, MoreVertical
+  RefreshCw
 } from 'lucide-react';
 
 const ElectricBorder = dynamic(() => import('./ElectricBorder'), { ssr: false });
@@ -179,7 +179,7 @@ export function EnhancedCallView() {
       {/* Draggable Local Video PiP */}
       {isVideoCall && (
         <DraggablePiP
-          initialPosition={{ x: window.innerWidth - 220, y: 100 }}
+          initialPosition={{ x: typeof window !== 'undefined' ? window.innerWidth - 220 : 600, y: 100 }}
           onSwap={swapVideos}
           onExpand={() => swapVideos()}
         >
@@ -245,6 +245,7 @@ export function EnhancedCallView() {
                 <button
                   onClick={toggleFullscreen}
                   className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+                  title="Toggle fullscreen"
                 >
                   {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
                 </button>

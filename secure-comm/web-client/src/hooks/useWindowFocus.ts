@@ -23,13 +23,19 @@ interface UseWindowFocusOptions {
 export function useWindowFocus(options: UseWindowFocusOptions = {}) {
   const [state, setState] = useState<WindowFocusState>({
     isFocused: true,
-    isVisible: !document.hidden,
+    isVisible: typeof document !== 'undefined' ? !document.hidden : true,
     wasBlurred: false,
     blurTime: null,
   });
 
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // BUGFIX: Store options in a ref to avoid re-creating callbacks when
+  // callers pass inline option objects (which are new refs every render).
+  // This prevents addEventListener/removeEventListener churn.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   // Handle window focus
   const handleFocus = useCallback(() => {
@@ -39,8 +45,8 @@ export function useWindowFocus(options: UseWindowFocusOptions = {}) {
       wasBlurred: false,
       blurTime: null,
     }));
-    options.onFocus?.();
-  }, [options]);
+    optionsRef.current.onFocus?.();
+  }, []);
 
   // Handle window blur
   const handleBlur = useCallback(() => {
@@ -50,8 +56,8 @@ export function useWindowFocus(options: UseWindowFocusOptions = {}) {
       wasBlurred: true,
       blurTime: Date.now(),
     }));
-    options.onBlur?.();
-  }, [options]);
+    optionsRef.current.onBlur?.();
+  }, []);
 
   // Handle visibility change (tab switch)
   const handleVisibilityChange = useCallback(() => {
@@ -60,13 +66,13 @@ export function useWindowFocus(options: UseWindowFocusOptions = {}) {
       ...prev,
       isVisible,
     }));
-    options.onVisibilityChange?.(isVisible);
-  }, [options]);
+    optionsRef.current.onVisibilityChange?.(isVisible);
+  }, []);
 
   // Handle before unload (close/refresh)
   const handleBeforeUnload = useCallback((event: BeforeUnloadEvent) => {
-    options.onBeforeUnload?.(event);
-  }, [options]);
+    optionsRef.current.onBeforeUnload?.(event);
+  }, []);
 
   useEffect(() => {
     window.addEventListener('focus', handleFocus);

@@ -199,6 +199,7 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
+            title="Close"
           >
             <X className="w-5 h-5" />
           </button>

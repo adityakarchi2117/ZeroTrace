@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import profileApi from '@/lib/profileApi';
 import { PrivacySettings, VisibilityLevel, ActiveSession } from '@/lib/profileTypes';
 import VisibilitySelector from './VisibilitySelector';
-import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type, Camera, Save, Loader2, Eye, Lock, Smartphone, Globe, UserX, ChevronRight, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
+import { X, User, Shield, Bell, Palette, Key, Download, Sun, Moon, Monitor, Check, Circle, Type, Camera, Save, Loader2, Eye, Lock, Smartphone, Globe, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
 import { loadBubbleStyle, saveBubbleStyle, loadFontStyle, saveFontStyle, bubbleStyles, fontStyles, BubbleStyle, FontStyle } from '@/lib/themeSync';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -467,6 +467,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-white transition-colors"
+            title="Close settings"
           >
             <X className="w-6 h-6" />
           </button>
@@ -540,6 +541,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="file"
                       accept="image/*"
                       className="hidden"
+                      aria-label="Upload avatar"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) handleAvatarUpload(f);
@@ -796,6 +798,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           onClick={() => updatePrivacySetting('discovery_opt_in', !privacySettings.discovery_opt_in)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${privacySettings.discovery_opt_in ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
                             }`}
+                          title="Toggle discoverability"
+                          role="switch"
+                          aria-checked={privacySettings.discovery_opt_in}
                         >
                           <span
                             className={`${privacySettings.discovery_opt_in ? 'translate-x-6' : 'translate-x-1'
@@ -1376,6 +1381,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       onClick={() => saveSettings({ messagePreview: !messagePreview })}
                       className={`relative w-12 h-6 rounded-full transition-colors ${messagePreview ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
+                      title="Toggle message preview"
+                      role="switch"
+                      aria-checked={messagePreview}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${messagePreview ? 'translate-x-7' : 'translate-x-1'
                         }`} />
@@ -1395,6 +1403,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       onClick={() => saveSettings({ animationsEnabled: !animationsEnabled })}
                       className={`relative w-12 h-6 rounded-full transition-colors ${animationsEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
+                      title="Toggle animations"
+                      role="switch"
+                      aria-checked={animationsEnabled}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${animationsEnabled ? 'translate-x-7' : 'translate-x-1'
                         }`} />

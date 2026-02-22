@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db.database import (
     VerificationBadge,
     VerificationRequest,
@@ -70,7 +70,7 @@ class VerificationRepository:
             badge_color=badge_color,
             expires_at=expires_at,
             verification_data=verification_data,
-            verified_at=datetime.utcnow(),
+            verified_at=datetime.now(timezone.utc),
             is_active=True,
         )
         self.db.add(badge)
@@ -218,7 +218,7 @@ class VerificationRepository:
             raise ValueError("Request has already been reviewed")
 
         request.status = VerificationStatusEnum.APPROVED if approved else VerificationStatusEnum.REJECTED
-        request.reviewed_at = datetime.utcnow()
+        request.reviewed_at = datetime.now(timezone.utc)
         request.reviewed_by = reviewer_id
         request.rejection_reason = rejection_reason
 

@@ -7,7 +7,7 @@ session key storage, device authorization, and revocation.
 
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
@@ -58,7 +58,7 @@ class DeviceSyncRepository:
             status="pending",
             initiator_device_id=initiator_device_id,
             initiator_ip=initiator_ip,
-            expires_at=datetime.utcnow() + timedelta(minutes=ttl_minutes),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes),
         )
         self.db.add(session)
         self.db.commit()
@@ -90,7 +90,7 @@ class DeviceSyncRepository:
             return None
         if session.status != "pending":
             return None
-        if session.expires_at < datetime.utcnow():
+        if session.expires_at < datetime.now(timezone.utc):
             session.status = "expired"
             self.db.commit()
             return None
@@ -106,7 +106,7 @@ class DeviceSyncRepository:
         session.new_device_type = new_device_type
         session.new_device_public_key = new_device_public_key
         session.new_device_fingerprint = fingerprint
-        session.scanned_at = datetime.utcnow()
+        session.scanned_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(session)
@@ -133,7 +133,7 @@ class DeviceSyncRepository:
         session.status = "approved"
         session.wrapped_dek_for_device = wrapped_dek_for_device
         session.dek_wrap_nonce = dek_wrap_nonce
-        session.approved_at = datetime.utcnow()
+        session.approved_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(session)
@@ -152,7 +152,7 @@ class DeviceSyncRepository:
             return None
 
         session.status = "completed"
-        session.completed_at = datetime.utcnow()
+        session.completed_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(session)
         return session
@@ -174,7 +174,7 @@ class DeviceSyncRepository:
             .filter(
                 DevicePairingSession.user_id == user_id,
                 DevicePairingSession.status.in_(["pending", "scanned"]),
-                DevicePairingSession.expires_at > datetime.utcnow(),
+                DevicePairingSession.expires_at > datetime.now(timezone.utc),
             )
             .order_by(desc(DevicePairingSession.created_at))
             .first()
@@ -234,7 +234,7 @@ class DeviceSyncRepository:
                 DeviceWrappedDEK.device_id == device_id,
                 DeviceWrappedDEK.is_active == True,
             )
-            .update({"is_active": False, "revoked_at": datetime.utcnow()})
+            .update({"is_active": False, "revoked_at": datetime.now(timezone.utc)})
         )
         self.db.commit()
         return count
@@ -285,7 +285,7 @@ class DeviceSyncRepository:
             existing.is_active = True
             existing.revoked_at = None
             existing.revoke_reason = None
-            existing.last_verified_at = datetime.utcnow()
+            existing.last_verified_at = datetime.now(timezone.utc)
             existing.last_ip = ip_address
             self.db.commit()
             self.db.refresh(existing)
@@ -338,7 +338,7 @@ class DeviceSyncRepository:
             return None
 
         auth.is_active = False
-        auth.revoked_at = datetime.utcnow()
+        auth.revoked_at = datetime.now(timezone.utc)
         auth.revoke_reason = reason
 
         # Also revoke the device's wrapped DEK
@@ -390,7 +390,7 @@ class DeviceSyncRepository:
             EncryptedSessionKey.user_id == user_id,
             EncryptedSessionKey.conversation_id == conversation_id,
             EncryptedSessionKey.is_active == True,
-        ).update({"is_active": False, "rotated_at": datetime.utcnow()})
+        ).update({"is_active": False, "rotated_at": datetime.now(timezone.utc)})
 
         sk = EncryptedSessionKey(
             user_id=user_id,
@@ -562,7 +562,7 @@ class DeviceSyncRepository:
                 RecoveryKeyBackup.user_id == user_id,
                 RecoveryKeyBackup.is_active == True,
             )
-        ).update({"is_active": False, "updated_at": datetime.utcnow()})
+        ).update({"is_active": False, "updated_at": datetime.now(timezone.utc)})
 
         backup = RecoveryKeyBackup(
             user_id=user_id,
@@ -606,7 +606,7 @@ class DeviceSyncRepository:
         backup = self.get_active_recovery_backup(user_id)
         if not backup:
             return False
-        backup.last_used_at = datetime.utcnow()
+        backup.last_used_at = datetime.now(timezone.utc)
         self.db.commit()
         return True
 
@@ -624,7 +624,7 @@ class DeviceSyncRepository:
                     RecoveryKeyBackup.is_active == True,
                 )
             )
-            .update({"is_active": False, "updated_at": datetime.utcnow()})
+            .update({"is_active": False, "updated_at": datetime.now(timezone.utc)})
         )
         self.db.commit()
         return count

@@ -133,8 +133,8 @@ export default function BlockedUsersPanel({ isOpen, onClose }: BlockedUsersPanel
               <button
                 onClick={onClose}
                 className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+                title="Close"
               >
-                <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
 

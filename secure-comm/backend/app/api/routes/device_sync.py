@@ -30,7 +30,7 @@ Rate-limited, device-fingerprinted, signature-validated.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -50,6 +50,7 @@ from app.models.device_sync import (
     SessionKeyBatchRewrapRequest,
     KeyRestoreRequest, KeyRestoreResponse,
     DeviceWrappedDEKResponse,
+    StoreWrappedDEKRequest, RegisterDeviceRequest,
     RevocationLogEntry,
     RecoveryBackupRequest, RecoveryBackupResponse,
     RecoveryRestoreResponse,
@@ -82,7 +83,7 @@ async def pair_init(
         db.query(func.count(DevicePairingSession.id))
         .filter(
             DevicePairingSession.user_id == user_id,
-            DevicePairingSession.created_at > datetime.utcnow() - timedelta(hours=1),
+            DevicePairingSession.created_at > datetime.now(timezone.utc) - timedelta(hours=1),
         )
         .scalar()
     )
@@ -266,7 +267,7 @@ async def pair_status(
         raise HTTPException(status_code=404, detail="Pairing session not found.")
 
     # Check expiry
-    if session.status == "pending" and session.expires_at < datetime.utcnow():
+    if session.status == "pending" and session.expires_at < datetime.now(timezone.utc):
         session.status = "expired"
         db.commit()
 
@@ -402,25 +403,22 @@ async def revocation_history(
 
 @router.post("/wrapped", response_model=DeviceWrappedDEKResponse, status_code=201)
 async def store_wrapped_dek(
-    device_id: str,
-    wrapped_dek: str,
-    wrap_nonce: str,
-    dek_version: int,
+    payload: StoreWrappedDEKRequest,
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Store a DEK wrapped for a specific device."""
+    """Store a DEK wrapped for a specific device. Accepts body (not query params) for security."""
     repo = DeviceSyncRepository(db)
 
-    if not repo.is_device_authorized(user_id, device_id):
+    if not repo.is_device_authorized(user_id, payload.device_id):
         raise HTTPException(status_code=403, detail="Device not authorized.")
 
     entry = repo.store_device_wrapped_dek(
         user_id=user_id,
-        device_id=device_id,
-        wrapped_dek=wrapped_dek,
-        wrap_nonce=wrap_nonce,
-        dek_version=dek_version,
+        device_id=payload.device_id,
+        wrapped_dek=payload.wrapped_dek,
+        wrap_nonce=payload.wrap_nonce,
+        dek_version=payload.dek_version,
     )
     return entry
 
@@ -439,7 +437,7 @@ async def get_wrapped_dek(
         raise HTTPException(status_code=404, detail="No wrapped DEK for this device.")
 
     # Update last_used_at
-    entry.last_used_at = datetime.utcnow()
+    entry.last_used_at = datetime.now(timezone.utc)
     db.commit()
 
     return entry
@@ -471,7 +469,7 @@ async def restore_keys(
 
     if device_dek:
         # Update last used
-        device_dek.last_used_at = datetime.utcnow()
+        device_dek.last_used_at = datetime.now(timezone.utc)
         db.commit()
 
         # Count session keys
@@ -487,21 +485,23 @@ async def restore_keys(
             profile_version=profile.version if profile else 0,
         )
 
-    # Fall back to user-level DEK (wrapped with identity key)
-    user_dek = sp_repo.get_active_dek(user_id)
-    if user_dek:
-        return KeyRestoreResponse(
-            wrapped_dek=user_dek.wrapped_dek,
-            wrap_nonce=user_dek.nonce,
-            dek_version=user_dek.dek_version,
-            device_authorized=authorized,
-            session_key_count=0,
-            profile_version=0,
-        )
+    # Fall back to user-level DEK ONLY if device is authorized
+    # (prevents leaking DEK to unrecognized/rogue devices)
+    if authorized:
+        user_dek = sp_repo.get_active_dek(user_id)
+        if user_dek:
+            return KeyRestoreResponse(
+                wrapped_dek=user_dek.wrapped_dek,
+                wrap_nonce=user_dek.nonce,
+                dek_version=user_dek.dek_version,
+                device_authorized=True,
+                session_key_count=0,
+                profile_version=0,
+            )
 
     raise HTTPException(
         status_code=404,
-        detail="No DEK found. Set up encryption first."
+        detail="No DEK found for this device. Complete device pairing first."
     )
 
 
@@ -593,16 +593,14 @@ async def rewrap_session_keys(
 
 @router.post("/register", response_model=DeviceInfoResponse, status_code=201)
 async def register_device(
-    device_id: str,
-    device_name: str = "Web Browser",
-    device_type: str = "web",
-    device_public_key: str = "",
-    request: Request = None,
+    payload: RegisterDeviceRequest,
+    request: Request,
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     """
     Register the current device on first login.
+    Accepts body (not query params) so device_public_key isn't logged.
     This is for the PRIMARY device (no pairing needed).
     Subsequent devices must go through the pairing flow.
     """
@@ -616,15 +614,15 @@ async def register_device(
 
     auth = repo.authorize_device(
         user_id=user_id,
-        device_id=device_id,
-        device_public_key=device_public_key or device_id,
-        device_name=device_name,
-        device_type=device_type,
+        device_id=payload.device_id,
+        device_public_key=payload.device_public_key or payload.device_id,
+        device_name=payload.device_name,
+        device_type=payload.device_type,
         is_primary=is_primary,
         ip_address=ip,
     )
 
-    logger.info(f"📱 Device registered: {device_id} (primary={is_primary})")
+    logger.info(f"📱 Device registered: {payload.device_id} (primary={is_primary})")
     return auth
 
 

@@ -161,8 +161,8 @@ export default function AddFriendPanel({
                 <button
                   onClick={onClose}
                   className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+                  title="Close"
                 >
-                  <X className="w-5 h-5 text-gray-400" />
                 </button>
               </div>
 
@@ -211,6 +211,7 @@ export default function AddFriendPanel({
                           value={searchType}
                           onChange={(e) => setSearchType(e.target.value as any)}
                           className="bg-gray-800 text-gray-300 rounded-lg px-3 py-2 text-sm border border-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                          title="Search type"
                         >
                           <option value="username">Username</option>
                           <option value="user_id">User ID</option>

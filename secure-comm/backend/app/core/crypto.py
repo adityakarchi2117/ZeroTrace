@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import secrets
 from typing import Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import x25519, ed25519
@@ -111,7 +111,7 @@ class QRCodeGenerator:
         - challenge: Random challenge for signing
         """
         challenge = CryptoUtils.generate_random_bytes(16)
-        expires_at = datetime.utcnow() + timedelta(minutes=expires_minutes)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
         
         return {
             "session_id": session_id,
@@ -221,10 +221,52 @@ class KeyValidation:
 
 
 class RateLimiter:
-    """Simple in-memory rate limiter for key operations"""
+    """Simple in-memory rate limiter for key operations.
+    
+    AUDIT FIX: Added periodic cleanup of stale entries to prevent unbounded
+    memory growth. Max 10,000 tracked identifiers.
+    
+    NOTE: This rate limiter is per-process. In multi-worker deployments
+    (e.g., multiple Uvicorn workers), each worker maintains its own state.
+    For strict rate limiting across workers, use Redis-backed rate limiting.
+    The current implementation is acceptable for abuse prevention but not
+    for strict per-user quotas in multi-worker setups.
+    """
+    
+    MAX_TRACKED_IDENTIFIERS = 10000
     
     def __init__(self):
         self._attempts: dict = {}
+        self._last_cleanup: datetime = datetime.now(timezone.utc)
+    
+    def _cleanup_stale(self, window_seconds: int = 300):
+        """Remove identifiers with no recent attempts.
+        
+        AUDIT FIX: Prevents unbounded memory growth by cleaning up
+        identifiers that haven't been seen in the last 5 minutes.
+        """
+        now = datetime.now(timezone.utc)
+        # Only run cleanup every 60 seconds
+        if (now - self._last_cleanup).total_seconds() < 60:
+            return
+        self._last_cleanup = now
+        
+        cutoff = now - timedelta(seconds=window_seconds)
+        stale_keys = [
+            k for k, v in self._attempts.items()
+            if not v or max(v) < cutoff
+        ]
+        for k in stale_keys:
+            del self._attempts[k]
+        
+        # Hard limit: if still too many, remove oldest
+        if len(self._attempts) > self.MAX_TRACKED_IDENTIFIERS:
+            sorted_keys = sorted(
+                self._attempts.keys(),
+                key=lambda k: max(self._attempts[k]) if self._attempts[k] else datetime.min
+            )
+            for k in sorted_keys[:len(self._attempts) - self.MAX_TRACKED_IDENTIFIERS]:
+                del self._attempts[k]
     
     def check_rate_limit(
         self,
@@ -236,7 +278,10 @@ class RateLimiter:
         Check if identifier is within rate limit
         Returns True if allowed, False if rate limited
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+        
+        # AUDIT FIX: Periodic cleanup
+        self._cleanup_stale(window_seconds * 5)
         
         if identifier not in self._attempts:
             self._attempts[identifier] = []

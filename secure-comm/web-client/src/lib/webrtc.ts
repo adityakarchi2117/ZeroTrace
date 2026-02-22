@@ -200,6 +200,9 @@ class WebRTCService {
     wsManager.on('call_rejected', (data) => {
       console.log('❌ Call rejected:', data);
       if (this.currentCall) {
+        // AUDIT FIX: Clear connection timeout to prevent failCall() from firing
+        // after rejection, which would override 'rejected' status with 'failed'
+        this.clearConnectionTimeout();
         this.currentCall.status = 'rejected';
         this.notifyStateChange();
         setTimeout(() => this.cleanup(), 3000);
@@ -784,6 +787,13 @@ class WebRTCService {
     try {
       // Get current screen track
       const currentTrack = this.localStream.getVideoTracks()[0];
+      
+      // AUDIT FIX: Find the video sender BEFORE stopping the track.
+      // On Safari, stopping a track detaches it from the sender (sender.track becomes null),
+      // making it impossible to find the correct sender afterward.
+      const senders = this.pc.getSenders();
+      const videoSender = senders.find(s => s.track?.kind === 'video');
+      
       if (currentTrack) {
         currentTrack.stop();
       }
@@ -799,14 +809,13 @@ class WebRTCService {
         
         const cameraTrack = cameraStream.getVideoTracks()[0];
         
-        const senders = this.pc.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        
         if (videoSender && cameraTrack) {
           await videoSender.replaceTrack(cameraTrack);
           
           // Update local stream
-          this.localStream.removeTrack(currentTrack);
+          if (currentTrack) {
+            this.localStream.removeTrack(currentTrack);
+          }
           this.localStream.addTrack(cameraTrack);
           
           if (this.currentCall) {

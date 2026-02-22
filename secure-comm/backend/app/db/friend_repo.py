@@ -5,7 +5,7 @@ Database operations for the friend system with security measures
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 import secrets
 import hashlib
@@ -59,7 +59,7 @@ class FriendRepository:
     
     def _reset_daily_counters_if_needed(self, rate_limit: FriendRequestRateLimit) -> None:
         """Reset daily counters if a new day has started"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if rate_limit.counter_reset_at:
             # Reset if last reset was more than 24 hours ago
             if now - rate_limit.counter_reset_at > timedelta(hours=24):
@@ -76,7 +76,7 @@ class FriendRepository:
         rate_limit = self._get_or_create_rate_limit(user_id)
         self._reset_daily_counters_if_needed(rate_limit)
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Check if user is currently rate limited
         if rate_limit.is_rate_limited and rate_limit.rate_limit_until:
@@ -103,7 +103,7 @@ class FriendRepository:
         """Increment rate limit counter after an action"""
         rate_limit = self._get_or_create_rate_limit(user_id)
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         if action == "request":
             rate_limit.requests_sent_today += 1
@@ -220,7 +220,7 @@ class FriendRepository:
     
     def get_pending_requests(self, user_id: int) -> dict:
         """Get all pending friend requests for a user"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Clean up expired requests first
         self.db.query(FriendRequest).filter(
@@ -286,7 +286,7 @@ class FriendRepository:
             contact.trust_level = TrustLevelEnum.UNVERIFIED
             contact.is_verified = False
             contact.verification_date = None
-            contact.last_key_exchange = datetime.utcnow()
+            contact.last_key_exchange = datetime.now(timezone.utc)
             # Increment key version to signal change
             contact.key_version += 1
         else:
@@ -326,7 +326,7 @@ class FriendRepository:
             return False, "Fingerprint verification failed - possible MITM attack", None
         
         # Check if request has expired
-        if request.expires_at < datetime.utcnow():
+        if request.expires_at < datetime.now(timezone.utc):
             request.status = FriendRequestStatusEnum.EXPIRED
             self.db.commit()
             return False, "Friend request has expired", None
@@ -341,7 +341,7 @@ class FriendRepository:
         # Update request status
         request.status = FriendRequestStatusEnum.ACCEPTED
         request.receiver_public_key_fingerprint = receiver_fingerprint
-        request.updated_at = datetime.utcnow()
+        request.updated_at = datetime.now(timezone.utc)
         
         # Create trusted contact for both users (bidirectional) using upsert
         sender_contact = self._upsert_trusted_contact(
@@ -378,7 +378,7 @@ class FriendRepository:
             return False, "Friend request not found or already processed"
         
         request.status = FriendRequestStatusEnum.REJECTED
-        request.updated_at = datetime.utcnow()
+        request.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         
         return True, ""
@@ -398,7 +398,7 @@ class FriendRepository:
             return False, "Friend request not found or already processed"
         
         request.status = FriendRequestStatusEnum.CANCELLED
-        request.updated_at = datetime.utcnow()
+        request.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         
         return True, ""
@@ -446,7 +446,7 @@ class FriendRepository:
             return False, "Fingerprint mismatch - keys may have changed"
         
         contact.is_verified = True
-        contact.verification_date = datetime.utcnow()
+        contact.verification_date = datetime.now(timezone.utc)
         contact.trust_level = TrustLevelEnum.VERIFIED
         self.db.commit()
         
@@ -497,7 +497,7 @@ class FriendRepository:
             return False, "Contact not found"
         
         contact.is_removed = True
-        contact.removed_at = datetime.utcnow()
+        contact.removed_at = datetime.now(timezone.utc)
         self.db.commit()
         
         return True, ""
@@ -522,7 +522,7 @@ class FriendRepository:
         contact.is_verified = False
         contact.trust_level = TrustLevelEnum.UNVERIFIED
         contact.verification_date = None
-        contact.last_key_exchange = datetime.utcnow()
+        contact.last_key_exchange = datetime.now(timezone.utc)
         contact.key_version += 1
         self.db.commit()
         
@@ -582,7 +582,7 @@ class FriendRepository:
         contact = self.get_contact(user_id, blocked_user_id)
         if contact:
             contact.is_removed = True
-            contact.removed_at = datetime.utcnow()
+            contact.removed_at = datetime.now(timezone.utc)
         
         self.db.commit()
         
@@ -788,7 +788,7 @@ class FriendRepository:
             payload=json.dumps(payload) if payload else None,
             related_user_id=related_user_id,
             related_request_id=related_request_id,
-            expires_at=datetime.utcnow() + timedelta(hours=expires_hours)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours)
         )
         self.db.add(notification)
         self.db.commit()
@@ -802,7 +802,7 @@ class FriendRepository:
             Notification.is_read == False,
             or_(
                 Notification.expires_at == None,
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now(timezone.utc)
             )
         ).order_by(Notification.created_at.desc()).limit(limit).all()
     
@@ -812,7 +812,7 @@ class FriendRepository:
             Notification.user_id == user_id,
             or_(
                 Notification.expires_at == None,
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now(timezone.utc)
             )
         ).order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
     
@@ -825,7 +825,7 @@ class FriendRepository:
         
         if notification:
             notification.is_read = True
-            notification.read_at = datetime.utcnow()
+            notification.read_at = datetime.now(timezone.utc)
             self.db.commit()
             return True
         return False
@@ -837,7 +837,7 @@ class FriendRepository:
             Notification.is_read == False
         ).update({
             "is_read": True,
-            "read_at": datetime.utcnow()
+            "read_at": datetime.now(timezone.utc)
         })
         self.db.commit()
         return count
@@ -850,7 +850,7 @@ class FriendRepository:
         
         if notification:
             notification.is_delivered = True
-            notification.delivered_at = datetime.utcnow()
+            notification.delivered_at = datetime.now(timezone.utc)
             self.db.commit()
             return True
         return False
@@ -863,7 +863,7 @@ class FriendRepository:
             Notification.is_read == False,
             or_(
                 Notification.expires_at == None,
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now(timezone.utc)
             )
         ).order_by(Notification.created_at.asc()).all()
     
@@ -874,7 +874,7 @@ class FriendRepository:
             Notification.user_id == user_id,
             or_(
                 Notification.expires_at == None,
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now(timezone.utc)
             )
         ).count()
         
@@ -884,7 +884,7 @@ class FriendRepository:
             Notification.is_read == False,
             or_(
                 Notification.expires_at == None,
-                Notification.expires_at > datetime.utcnow()
+                Notification.expires_at > datetime.now(timezone.utc)
             )
         ).count()
         
@@ -917,7 +917,7 @@ class FriendRepository:
     def cleanup_expired_notifications(self) -> int:
         """Remove expired notifications"""
         count = self.db.query(Notification).filter(
-            Notification.expires_at < datetime.utcnow()
+            Notification.expires_at < datetime.now(timezone.utc)
         ).delete()
         self.db.commit()
         return count
@@ -936,7 +936,7 @@ class FriendRepository:
         
         if existing:
             existing.rejection_count += 1
-            existing.created_at = datetime.utcnow()
+            existing.created_at = datetime.now(timezone.utc)
         else:
             log = RejectionLog(rejection_hash=rejection_hash)
             self.db.add(log)
@@ -980,7 +980,7 @@ class FriendRepository:
         user = self.db.query(User).filter(User.id == user_id).first()
         other_user = self.db.query(User).filter(User.id == contact_user_id).first()
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Soft delete both contact records
         if user_contact:

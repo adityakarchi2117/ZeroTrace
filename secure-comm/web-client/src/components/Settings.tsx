@@ -31,6 +31,7 @@ const Settings = () => {
                   value={autoDelete}
                   onChange={(e) => setAutoDelete(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Default message expiry"
                 >
                   <option value="none">Never</option>
                   <option value="after_read">After read</option>
@@ -89,6 +90,7 @@ const Settings = () => {
                     className="sr-only peer" 
                     checked={notifications}
                     onChange={(e) => setNotifications(e.target.checked)}
+                    aria-label="Push notifications"
                   />
                   <div className="w-11 h-6 bg-slate-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                 </label>
@@ -105,6 +107,7 @@ const Settings = () => {
                     className="sr-only peer" 
                     checked={soundEnabled}
                     onChange={(e) => setSoundEnabled(e.target.checked)}
+                    aria-label="Sound notifications"
                   />
                   <div className="w-11 h-6 bg-slate-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                 </label>
@@ -130,6 +133,7 @@ const Settings = () => {
                   value={theme}
                   onChange={(e) => setTheme(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Theme"
                 >
                   <option value="dark">Dark</option>
                   <option value="light">Light</option>
@@ -141,9 +145,13 @@ const Settings = () => {
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Message Font Size
                 </label>
-                <select className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select
+                  defaultValue="medium"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Message font size"
+                >
                   <option value="small">Small</option>
-                  <option value="medium" selected>Medium</option>
+                  <option value="medium">Medium</option>
                   <option value="large">Large</option>
                 </select>
               </div>

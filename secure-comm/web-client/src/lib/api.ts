@@ -106,6 +106,7 @@ class ApiClient {
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
+      timeout: 30000, // 30s timeout to prevent indefinite hangs
       headers: {
         'Content-Type': 'application/json',
       },
@@ -118,6 +119,22 @@ class ApiClient {
       }
       return config;
     });
+
+    // Add response interceptor to handle 401 (expired token)
+    this.client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401 && this.token) {
+          console.warn('🔒 Token expired or invalid — triggering logout');
+          this.token = null;
+          // Dispatch a custom event that the store/auth layer can listen for
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth:token-expired'));
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
   }
 
   setToken(token: string | null) {

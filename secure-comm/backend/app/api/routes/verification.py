@@ -26,6 +26,7 @@ def get_db():
 @router.get("/verification/summary/{user_id}", response_model=UserVerificationSummary)
 async def get_verification_summary(
     user_id: int,
+    _current_user: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
     
@@ -50,6 +51,7 @@ async def get_my_badges(
 @router.get("/verification/badges/{target_user_id}", response_model=List[VerificationBadgeResponse])
 async def get_user_badges(
     target_user_id: int,
+    _current_user: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
     

@@ -25,7 +25,7 @@ interface DraggablePiPProps {
 
 export function DraggablePiP({
   children,
-  initialPosition = { x: window.innerWidth - 220, y: window.innerHeight - 280 },
+  initialPosition = { x: typeof window !== 'undefined' ? window.innerWidth - 220 : 600, y: typeof window !== 'undefined' ? window.innerHeight - 280 : 400 },
   initialSize = { width: 180, height: 240 },
   minSize = { width: 120, height: 160 },
   maxSize = { width: 320, height: 240 },
@@ -39,12 +39,12 @@ export function DraggablePiP({
   const [isResizing, setIsResizing] = useState(false);
   const [showControls, setShowControls] = useState(false);
 
-  // Calculate bounds
+  // Calculate bounds (SSR-safe)
   const bounds = {
     left: 0,
-    right: window.innerWidth - size.width,
+    right: typeof window !== 'undefined' ? window.innerWidth - size.width : 800,
     top: 0,
-    bottom: window.innerHeight - size.height - 100, // Leave space for nav
+    bottom: typeof window !== 'undefined' ? window.innerHeight - size.height - 100 : 600,
   };
 
   const { position, isDragging } = useDraggable(containerRef, {

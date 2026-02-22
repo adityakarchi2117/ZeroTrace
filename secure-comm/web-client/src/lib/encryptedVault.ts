@@ -292,6 +292,9 @@ export class LegacyMigrationHandler {
    * Check if legacy migration is needed.
    */
   static needsMigration(): boolean {
+    // AUDIT FIX: SSR guard — localStorage is unavailable during server-side rendering
+    if (typeof window === 'undefined') return false;
+    
     const status = localStorage.getItem(MIGRATION_STATUS_KEY);
     if (status === 'completed') return false;
 

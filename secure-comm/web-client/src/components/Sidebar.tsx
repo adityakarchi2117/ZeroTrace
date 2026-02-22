@@ -35,6 +35,10 @@ interface SearchResult {
   is_online?: boolean;
 }
 
+// BUGFIX: Extract API_BASE to module level so it's computed once at build time
+// instead of being re-evaluated in each component instance
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // Memoized conversation item to prevent unnecessary re-renders
 const ConversationItem = React.memo(({
   conv,
@@ -53,7 +57,6 @@ const ConversationItem = React.memo(({
   formatTime: (date: string) => string;
   onClick: () => void;
 }) => {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const avatarUrl = conv.avatar_url
     ? (conv.avatar_url.startsWith('http') ? conv.avatar_url : `${API_BASE}${conv.avatar_url}`)
     : null;
@@ -228,6 +231,7 @@ export default function Sidebar({
       window.removeEventListener('contact_removed', handleContactRemoved);
       window.removeEventListener('blocked', handleContactRemoved);
       window.removeEventListener('profile_updated', handleProfileUpdated);
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
   }, [refreshContacts, fetchPendingRequestCount, loadConversations, loadStoredAuth]);
 
@@ -466,7 +470,7 @@ export default function Sidebar({
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} p-2 bg-cipher-darker/50 dark:bg-gray-800/50 rounded-lg`}>
           <MotionAvatar
             name={user?.display_name || user?.username || 'U'}
-            src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${user.avatar_url}`) : undefined}
+            src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `${API_BASE}${user.avatar_url}`) : undefined}
             size={collapsed ? 'sm' : 'md'}
             disableTilt
           />
@@ -515,6 +519,7 @@ export default function Sidebar({
               <button
                 onClick={clearSearch}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                title="Clear search"
               >
                 <X className="w-4 h-4" />
               </button>

@@ -111,7 +111,7 @@ export default function ProfileHistoryViewer({
                   <button
                     className="text-xs text-amber-400 hover:text-amber-300 ml-2 whitespace-nowrap disabled:opacity-30"
                     onClick={() => handleRollback(entry.id)}
-                    disabled={rollingBack === entry.id}
+                    disabled={rollingBack !== null}
                   >
                     {rollingBack === entry.id ? "Rolling back…" : "Rollback"}
                   </button>

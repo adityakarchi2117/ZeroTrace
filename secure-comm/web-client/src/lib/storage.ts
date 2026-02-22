@@ -279,32 +279,36 @@ class LocalStorageManager {
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(['messages'], 'readonly');
       const store = transaction.objectStore('messages');
+      const conversationIndex = store.index('conversation');
       const messages: StoredMessage[] = [];
+      let pending = 2;
 
-      const request = store.openCursor();
-      request.onsuccess = (event) => {
-        const cursor = (event.target as IDBRequest).result;
-        if (cursor) {
-          const message = cursor.value as StoredMessage;
-
-          // Check if message is part of conversation
-          const isConversationMessage =
-            (message.sender_username === username && message.recipient_username === currentUsername) ||
-            (message.sender_username === currentUsername && message.recipient_username === username);
-
-          if (isConversationMessage) {
-            messages.push(message);
-          }
-
-          cursor.continue();
-        } else {
-          // Sort by created_at and limit
-          messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-          resolve(messages.slice(-limit)); // Get last N messages
+      const onComplete = () => {
+        pending--;
+        if (pending === 0) {
+          // Deduplicate (in case any overlap), sort, and limit
+          // AUDIT FIX: Use String() to normalize id types (number vs string from API)
+          const seen = new Set<string>();
+          const unique = messages.filter(m => {
+            const key = String(m.id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          unique.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+          resolve(unique.slice(-limit));
         }
       };
 
-      request.onerror = () => reject(request.error);
+      // Direction 1: sender=username, recipient=currentUsername
+      const req1 = conversationIndex.getAll(IDBKeyRange.only([username, currentUsername]));
+      req1.onsuccess = () => { messages.push(...req1.result); onComplete(); };
+      req1.onerror = () => reject(req1.error);
+
+      // Direction 2: sender=currentUsername, recipient=username
+      const req2 = conversationIndex.getAll(IDBKeyRange.only([currentUsername, username]));
+      req2.onsuccess = () => { messages.push(...req2.result); onComplete(); };
+      req2.onerror = () => reject(req2.error);
     });
   }
 

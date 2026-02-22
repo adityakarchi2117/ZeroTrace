@@ -6,9 +6,9 @@ services:
     image: postgres:15-alpine
     container_name: cipherlink-db
     environment:
-      POSTGRES_DB: cipherlink
-      POSTGRES_USER: cipherlink
-      POSTGRES_PASSWORD: secure123
+      POSTGRES_DB: ${POSTGRES_DB:-cipherlink}
+      POSTGRES_USER: ${POSTGRES_USER:-cipherlink}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -27,7 +27,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cipherlink-redis
-    command: redis-server --appendonly yes --requirepass cipherlink123
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
     volumes:
       - redis_data:/data
     ports:
@@ -47,10 +47,10 @@ services:
       dockerfile: Dockerfile
     container_name: cipherlink-backend
     environment:
-      - DATABASE_URL=postgresql://cipherlink:secure123@db:5432/cipherlink
-      - REDIS_URL=redis://:cipherlink123@redis:6379/0
-      - SECRET_KEY=your-super-secret-key-change-in-production
-      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-cipherlink}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-cipherlink}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env - generate with: openssl rand -hex 64}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - ALLOWED_ORIGINS=["http://localhost:3000", "http://web:3000"]
       - ALLOWED_HOSTS=["localhost", "127.0.0.1", "backend"]
     ports:

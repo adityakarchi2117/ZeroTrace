@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono, Playfair_Display, Dancing_Script, Nunito } from 
 import './globals.css';
 import AppearanceProvider from '@/components/AppearanceProvider';
 import { MotionProvider } from '@/lib/motion';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-code' });
@@ -35,12 +36,14 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} ${playfair.variable} ${dancingScript.variable} ${nunito.variable} ${inter.className} bg-gray-900 text-white antialiased`} suppressHydrationWarning>
         <MotionProvider>
-          <AppearanceProvider>
-            <div id="root" className="min-h-screen">
-              {children}
-            </div>
-            <div id="modal-root" />
-          </AppearanceProvider>
+          <ErrorBoundary>
+            <AppearanceProvider>
+              <div id="root" className="min-h-screen">
+                {children}
+              </div>
+              <div id="modal-root" />
+            </AppearanceProvider>
+          </ErrorBoundary>
         </MotionProvider>
       </body>
     </html>

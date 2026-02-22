@@ -78,7 +78,7 @@ async def send_message(
     return new_message
 
 @router.get("/conversation/{username}", response_model=List[MessageResponse])
-async def get_conversation(
+def get_conversation(
     username: str,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -91,11 +91,14 @@ async def get_conversation(
     user_id = payload.get("user_id")
     message_service = MessageService(db)
     
-    messages = message_service.get_conversation(user_id, username)
+    try:
+        messages = message_service.get_conversation(user_id, username)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return messages
 
 @router.get("/history/{peer_username}", response_model=List[MessageResponse])
-async def get_message_history(
+def get_message_history(
     peer_username: str,
     limit: int = 50,
     offset: int = 0,
@@ -107,14 +110,21 @@ async def get_message_history(
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     
+    # AUDIT FIX: Bound limit to prevent DoS via huge page sizes
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    
     user_id = payload.get("user_id")
     message_service = MessageService(db)
     
-    messages = message_service.get_message_history(user_id, peer_username, limit, offset)
+    try:
+        messages = message_service.get_message_history(user_id, peer_username, limit, offset)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return messages
 
 @router.get("/all-conversations", response_model=dict)
-async def get_all_conversations_with_messages(
+def get_all_conversations_with_messages(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
@@ -127,7 +137,10 @@ async def get_all_conversations_with_messages(
     message_service = MessageService(db)
     
     # Get raw ORM messages grouped by peer username
-    conversations = message_service.get_all_conversations_with_messages(user_id)
+    try:
+        conversations = message_service.get_all_conversations_with_messages(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     # Serialize to Pydantic models so FastAPI can return JSON safely
     serialized = {
@@ -137,7 +150,7 @@ async def get_all_conversations_with_messages(
     return serialized
 
 @router.get("/unread", response_model=List[MessageResponse])
-async def get_unread_messages(
+def get_unread_messages(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
@@ -154,7 +167,7 @@ async def get_unread_messages(
 
 
 @router.get("/calls/history", response_model=List[CallLogResponse])
-async def get_call_history(
+def get_call_history(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
@@ -170,7 +183,7 @@ async def get_call_history(
 
 
 @router.delete("/{message_id:int}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_message(
+def delete_message(
     message_id: int,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -191,7 +204,7 @@ async def delete_message(
 
 
 @router.delete("/conversation/{username}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_conversation(
+def delete_conversation(
     username: str,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -210,7 +223,7 @@ async def delete_conversation(
 
 
 @router.delete("/calls/history/{username}")
-async def delete_call_history(
+def delete_call_history(
     username: str,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)

@@ -191,6 +191,7 @@ export default function TrustedContactsList({
               <button
                 onClick={onClose}
                 className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+                title="Close"
               >
                 <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -276,6 +277,7 @@ export default function TrustedContactsList({
                       <button
                         onClick={() => setSelectedContact(selectedContact?.id === contact.id ? null : contact)}
                         className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+                        title="Toggle details"
                       >
                         <svg className={`w-4 h-4 text-gray-400 transition-transform ${selectedContact?.id === contact.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

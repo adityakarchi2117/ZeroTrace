@@ -280,3 +280,48 @@ class RecoveryKeyBackup(Base):
         Index('ix_recovery_user', 'user_id'),
         Index('ix_recovery_active', 'user_id', 'is_active'),
     )
+
+
+class PublicKeyHistory(Base):
+    """
+    Historical record of a user's public keys.
+
+    When a user uploads new keys (e.g., from a new device or key rotation),
+    the PREVIOUS public key is saved here before being overwritten.
+    This enables:
+      - Decryption of old messages encrypted with a previous key
+      - Audit trail of key changes
+      - Key mismatch diagnostics
+
+    Key lifecycle:
+      1. User registers → first public_key stored on User model
+      2. User logs in from new device → generates new keys
+      3. upload_keys saves OLD key to this table → overwrites User.public_key
+      4. Old messages can still reference the historical key for decryption
+    """
+    __tablename__ = "public_key_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # The previous public key that was replaced
+    public_key = Column(Text, nullable=False)
+    identity_key = Column(Text, nullable=True)
+    signed_prekey = Column(Text, nullable=True)
+    signed_prekey_signature = Column(Text, nullable=True)
+
+    # When this key was the active key
+    active_from = Column(DateTime, nullable=True)
+    active_until = Column(DateTime, default=datetime.utcnow)
+
+    # Why the key changed
+    reason = Column(String(200), default="key_upload")  # key_upload, rotation, device_change
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index('ix_key_history_user', 'user_id'),
+        Index('ix_key_history_user_active', 'user_id', 'active_until'),
+    )

@@ -52,8 +52,8 @@ class KeyService:
         user.signed_prekey = signed_prekey
         user.signed_prekey_signature = signed_prekey_signature
         
-        from datetime import datetime
-        user.signed_prekey_timestamp = datetime.utcnow()
+        from datetime import datetime, timezone
+        user.signed_prekey_timestamp = datetime.now(timezone.utc)
         
         self.db.commit()
         return True
@@ -100,8 +100,8 @@ class KeyService:
             return None
         
         prekey.is_used = True
-        from datetime import datetime
-        prekey.used_at = datetime.utcnow()
+        from datetime import datetime, timezone
+        prekey.used_at = datetime.now(timezone.utc)
         
         self.db.commit()
         return prekey.public_key
@@ -147,8 +147,8 @@ class KeyService:
         user.signed_prekey = new_signed_prekey
         user.signed_prekey_signature = new_signature
         
-        from datetime import datetime
-        user.signed_prekey_timestamp = datetime.utcnow()
+        from datetime import datetime, timezone
+        user.signed_prekey_timestamp = datetime.now(timezone.utc)
         
         self.db.commit()
         return True

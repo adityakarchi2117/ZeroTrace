@@ -17,9 +17,10 @@ All endpoints work with encrypted blobs only — the server NEVER sees plaintext
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import hashlib
+import hmac
 import uuid
 import logging
 
@@ -187,7 +188,7 @@ async def rotate_keys(
         user.public_key = payload.new_public_key
         user.signed_prekey = payload.new_signed_prekey
         user.signed_prekey_signature = payload.new_signed_prekey_signature
-        user.signed_prekey_timestamp = datetime.utcnow()
+        user.signed_prekey_timestamp = datetime.now(timezone.utc)
         
         # 2. Store new one-time pre-keys if provided
         if payload.new_one_time_prekeys:
@@ -237,7 +238,7 @@ async def rotate_keys(
             message="Key rotation successful. All encrypted data remains accessible.",
             new_dek_version=new_dek.dek_version,
             key_version=total_rotations,
-            rotated_at=datetime.utcnow(),
+            rotated_at=datetime.now(timezone.utc),
         )
     
     except Exception as e:
@@ -502,9 +503,13 @@ async def download_encrypted_photo(
     if not pic:
         raise HTTPException(status_code=404, detail="No encrypted profile picture found.")
     
-    # Resolve file path
+    # Resolve file path with traversal protection
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(base_dir, pic.encrypted_file_path.lstrip("/"))
+    upload_root = os.path.abspath(os.path.join(base_dir, "uploads", "encrypted_avatars"))
+    file_path = os.path.abspath(os.path.join(base_dir, pic.encrypted_file_path.lstrip("/")))
+    
+    if not file_path.startswith(upload_root):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
     
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Encrypted file not found on disk.")
@@ -640,8 +645,11 @@ async def restore_backup(
     if not backup:
         raise HTTPException(status_code=404, detail="Backup not found.")
     
-    # Verify backup key hash
-    if backup.backup_key_hash != payload.backup_key_hash:
+    # Verify backup key hash (constant-time comparison to prevent timing attacks)
+    if not hmac.compare_digest(
+        backup.backup_key_hash.encode('utf-8'),
+        payload.backup_key_hash.encode('utf-8'),
+    ):
         raise HTTPException(status_code=403, detail="Invalid backup password.")
     
     return BackupRestoreResponse(
@@ -701,7 +709,7 @@ async def get_key_info(
         identity_key_fingerprint=identity_fp,
         dek_version=dek.dek_version if dek else 0,
         dek_algorithm=dek.dek_algorithm if dek else "none",
-        dek_created_at=dek.created_at if dek else datetime.utcnow(),
+        dek_created_at=dek.created_at if dek else datetime.now(timezone.utc),
         dek_last_rotated=dek.rotated_at if dek else None,
         profile_version=profile.version if profile else 0,
         total_key_rotations=total_rotations,

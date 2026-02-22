@@ -1,7 +1,19 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Enum, Index, JSON
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
-from datetime import datetime
+from sqlalchemy.ext.mutable import MutableDict, MutableList
+from datetime import datetime, timezone
 import enum
+
+
+def _utcnow():
+    """Return timezone-aware UTC datetime. Replaces deprecated datetime.now(timezone.utc)."""
+    return datetime.now(timezone.utc)
+
+# BUGFIX: MutableDict/MutableList wrappers to ensure SQLAlchemy detects
+# in-place mutations on JSON columns (e.g. dict[key]=value, list.append())
+MutableJSON = MutableDict.as_mutable(JSON)
+MutableListJSON = MutableList.as_mutable(JSON)
+
 from app.core.config import settings
 
 # Fix DATABASE_URL for Render (postgres:// -> postgresql://)
@@ -17,15 +29,17 @@ if settings.is_postgres:
         # Use SSL for production PostgreSQL (required by Render)
         connect_args = {"sslmode": "require"}
     
+    # AUDIT FIX: Increased pool_size from 5→20, max_overflow from 10→30
+    # for production workloads. Added pool_pre_ping to detect stale connections.
     engine = create_engine(
         database_url,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=20,
+        max_overflow=30,
         pool_timeout=30,
         pool_recycle=1800,
+        pool_pre_ping=True,  # AUDIT FIX: Detect stale connections
         connect_args=connect_args,
-        # Prevent SQL injection logging
-        echo=settings.DEBUG,  # Only log SQL in debug mode
+        echo=settings.DEBUG,
     )
 else:
     # SQLite configuration
@@ -126,13 +140,13 @@ class User(Base):
     is_disabled = Column(Boolean, default=False)  # User-initiated disable
     disabled_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     last_seen = Column(DateTime, nullable=True)
-    settings = Column(JSON, nullable=True)  # User preferences (theme, etc.)
+    settings = Column(MutableJSON, nullable=True)  # User preferences (theme, etc.)
     
     # Username change tracking
     last_username_change = Column(DateTime, nullable=True)
-    previous_usernames = Column(JSON, nullable=True)  # List of previous usernames
+    previous_usernames = Column(MutableListJSON, nullable=True)  # List of previous usernames
     
     # Relationships
     devices = relationship("Device", back_populates="user", cascade="all, delete-orphan")
@@ -173,7 +187,7 @@ class CallLog(Base):
     call_type = Column(Enum(CallTypeEnum), default=CallTypeEnum.AUDIO)
     status = Column(Enum(CallStatusEnum), default=CallStatusEnum.COMPLETED)
     
-    start_time = Column(DateTime, default=datetime.utcnow)
+    start_time = Column(DateTime, default=_utcnow)
     end_time = Column(DateTime, nullable=True)
     duration_seconds = Column(Integer, default=0)
     
@@ -193,16 +207,16 @@ class UserProfile(Base):
     birthday = Column(Date, nullable=True)
     location_city = Column(String(120), nullable=True)
     website = Column(String(255), nullable=True)
-    social_links = Column(JSON, nullable=True)
+    social_links = Column(MutableJSON, nullable=True)
     status_message = Column(String(160), nullable=True)
     pronouns = Column(String(32), nullable=True)
     emoji_badge = Column(String(16), nullable=True)
-    theme = Column(JSON, nullable=True)
+    theme = Column(MutableJSON, nullable=True)
     banner_url = Column(String(512), nullable=True)
     avatar_url = Column(String(512), nullable=True)
     avatar_blur = Column(String(64), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
     user = relationship("User", back_populates="profile")
 
@@ -214,7 +228,7 @@ class PrivacySettings(Base):
     
     profile_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
     avatar_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
-    field_visibility = Column(JSON, nullable=True)  # granular per-field map
+    field_visibility = Column(MutableJSON, nullable=True)  # granular per-field map
     
     last_seen_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
     online_visibility = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
@@ -224,8 +238,8 @@ class PrivacySettings(Base):
     discovery_opt_in = Column(Boolean, default=True)
     message_request_policy = Column(Enum(VisibilityLevel), default=VisibilityLevel.FRIENDS)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
     user = relationship("User", back_populates="privacy")
 
@@ -243,8 +257,8 @@ class Device(Base):
     # Device-specific keys
     public_key = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_active = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    last_active = Column(DateTime, default=_utcnow)
     is_active = Column(Boolean, default=True)
     
     # Push notification token
@@ -262,7 +276,7 @@ class OneTimePreKey(Base):
     key_id = Column(Integer, nullable=False)  # Client-assigned key ID
     public_key = Column(Text, nullable=False)
     is_used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     used_at = Column(DateTime, nullable=True)
     
     user = relationship("User", back_populates="one_time_prekeys")
@@ -295,16 +309,16 @@ class Message(Base):
     reply_to_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
     delivered_at = Column(DateTime, nullable=True)
     read_at = Column(DateTime, nullable=True)
     
     # For file messages
     file_id = Column(String(100), nullable=True)
-    file_metadata = Column(JSON, nullable=True)
+    file_metadata = Column(MutableJSON, nullable=True)
     
     # Theme synchronization (unencrypted UI metadata)
-    sender_theme = Column(JSON, nullable=True)
+    sender_theme = Column(MutableJSON, nullable=True)
     
     # Soft deletion for each user
     sender_deleted = Column(Boolean, default=False)
@@ -318,6 +332,8 @@ class Message(Base):
     __table_args__ = (
         Index('ix_messages_conversation', 'sender_id', 'recipient_id', 'created_at'),
         Index('ix_messages_recipient_status', 'recipient_id', 'status'),
+        # AUDIT FIX: Index for cleanup_expired_messages background task
+        Index('ix_messages_expires_at', 'expires_at'),
     )
 
 
@@ -340,8 +356,8 @@ class VaultItem(Base):
     # Sync metadata
     version = Column(Integer, default=1)
     is_deleted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
     user = relationship("User", back_populates="vault_items")
     
@@ -358,7 +374,7 @@ class Contact(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     contact_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     nickname = Column(String(100), nullable=True)  # Encrypted nickname
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     is_blocked = Column(Boolean, default=False)
     
     user = relationship("User", foreign_keys=[user_id], back_populates="contacts")
@@ -378,7 +394,7 @@ class QRLoginSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Set when approved
     challenge = Column(String(100), nullable=False)
     status = Column(String(20), default="pending")  # pending, approved, expired
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     expires_at = Column(DateTime, nullable=False)
     approved_device_id = Column(String(100), nullable=True)
 
@@ -391,7 +407,7 @@ class RefreshToken(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     device_id = Column(String(100), nullable=False)
     token_hash = Column(String(255), unique=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     expires_at = Column(DateTime, nullable=False)
     is_revoked = Column(Boolean, default=False)
     
@@ -409,12 +425,12 @@ class VerificationBadge(Base):
     verification_type = Column(Enum(VerificationTypeEnum), nullable=False)
     badge_label = Column(String(100), nullable=True)  # Custom label for custom badges
     badge_color = Column(String(20), nullable=True)  # Hex color for badge
-    verified_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    verified_at = Column(DateTime, nullable=False, default=_utcnow)
     expires_at = Column(DateTime, nullable=True)  # For temporary verifications
     verified_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Admin who verified
-    verification_data = Column(JSON, nullable=True)  # Store verification metadata
+    verification_data = Column(MutableJSON, nullable=True)  # Store verification metadata
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     
     user = relationship("User", foreign_keys=[user_id])
     verifier = relationship("User", foreign_keys=[verified_by], passive_deletes=True)
@@ -433,14 +449,14 @@ class VerificationRequest(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     verification_type = Column(Enum(VerificationTypeEnum), nullable=False)
     status = Column(Enum(VerificationStatusEnum), default=VerificationStatusEnum.PENDING)
-    requested_at = Column(DateTime, default=datetime.utcnow)
+    requested_at = Column(DateTime, default=_utcnow)
     reviewed_at = Column(DateTime, nullable=True)
     reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     rejection_reason = Column(Text, nullable=True)
-    supporting_documents = Column(JSON, nullable=True)  # URLs to uploaded documents
+    supporting_documents = Column(MutableJSON, nullable=True)  # URLs to uploaded documents
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
     user = relationship("User", foreign_keys=[user_id])
     reviewer = relationship("User", foreign_keys=[reviewed_by], passive_deletes=True)
@@ -461,8 +477,8 @@ class VerificationHistory(Base):
     action = Column(String(50), nullable=False)  # 'granted', 'revoked', 'expired'
     performed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reason = Column(Text, nullable=True)
-    meta = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    meta = Column(MutableJSON, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
     
     user = relationship("User", foreign_keys=[user_id])
     performer = relationship("User", foreign_keys=[performed_by], passive_deletes=True)
@@ -481,7 +497,7 @@ class ProfileHistory(Base):
     changed_fields = Column(JSON, nullable=False, default=list)
     snapshot = Column(JSON, nullable=False, default=dict)
     change_source = Column(String(50), nullable=False, default="user")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     user = relationship("User", foreign_keys=[user_id])
 
@@ -500,9 +516,9 @@ class ProfileReport(Base):
     reported_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     reason = Column(String(50), nullable=False)
     description = Column(Text, nullable=True)
-    evidence_snapshot = Column(JSON, nullable=True)
+    evidence_snapshot = Column(MutableJSON, nullable=True)
     status = Column(String(20), nullable=False, default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     reporter = relationship("User", foreign_keys=[reporter_id])
     reported_user = relationship("User", foreign_keys=[reported_user_id])

@@ -21,11 +21,11 @@ import { SmartCallOverlay } from './SmartCallOverlay';
 import QRCodeDisplay from './QRCodeDisplay';
 import ContactProfilePopup from './ContactProfilePopup';
 import {
-  Lock, Send, Smile, Paperclip, Phone, Video,
+  Send, Smile, Paperclip, Phone, Video,
   MoreVertical, Shield, Check, CheckCheck, Clock,
-  ArrowLeft, Info, X, PhoneOff, Mic, MicOff,
-  VideoOff, Image, File, Loader2, Download, FileText,
-  AlertCircle, Monitor, Trash2, UserX, UserMinus, ShieldOff, QrCode, RefreshCw
+  ArrowLeft, Info, X, PhoneOff,
+  Image, File, Loader2, Download, FileText,
+  AlertCircle, Trash2, UserX, UserMinus, ShieldOff, QrCode, RefreshCw
 } from 'lucide-react';
 import { format } from 'date-fns';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
@@ -76,7 +76,7 @@ function AnimatedMessageBubble({
         type: 'spring',
         stiffness: 400,
         damping: 25,
-        delay: index * 0.03,
+        delay: Math.min((index ?? 0) * 0.03, 0.3),
       }}
       style={{
         transformStyle: 'preserve-3d',
@@ -154,6 +154,7 @@ export default function ChatView() {
   const [newMessageIds, setNewMessageIds] = useState<Set<number>>(new Set());
 
   const decryptedCacheRef = useRef<Map<number, string>>(new Map());
+  const MAX_DECRYPTED_CACHE = 500; // BUGFIX: LRU cap to prevent unbounded memory growth
 
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -395,6 +396,16 @@ export default function ChatView() {
     if (!files || files.length === 0 || !currentConversation) return;
 
     const file = files[0];
+
+    // BUGFIX: Client-side file size limit before base64 conversion
+    // Prevents browser tab crash on large files (base64 ~33% larger than raw)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setShowAttachMenu(false);
     setIsSending(true);
 
@@ -430,6 +441,12 @@ export default function ChatView() {
 
     if (decryptedCacheRef.current.has(msg.id)) {
       return decryptedCacheRef.current.get(msg.id)!;
+    }
+
+    // BUGFIX: Evict oldest entries when cache exceeds LRU cap
+    if (decryptedCacheRef.current.size >= MAX_DECRYPTED_CACHE) {
+      const firstKey = decryptedCacheRef.current.keys().next().value;
+      if (firstKey !== undefined) decryptedCacheRef.current.delete(firstKey);
     }
 
     if (msg._decryptedContent) {
@@ -1182,25 +1199,26 @@ export default function ChatView() {
                         onContextMenu={(e) => !isDeleted && handleMessageContextMenu(e, msg.id, isMine)}
                       >
                         {renderMessageContent(msg)}
-                        <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : ''}`}>
+                        <div className={`flex items-center gap-1.5 mt-1 ${isMine ? 'justify-end' : ''}`}>
                           <span className={`${fontClasses.xs} opacity-60`}>
                             {format(item.date, 'HH:mm')}
                           </span>
+                          {isMine && getMessageStatus(msg)}
                           {!isDeleted && (
                             <motion.button
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
                                 handleMessageContextMenu(e, msg.id, isMine);
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-400 transition-opacity"
-                              title="Delete"
-                              whileHover={{ scale: 1.2 }}
-                              whileTap={{ scale: 0.9 }}
+                              className="relative z-10 p-1 rounded-full opacity-0 group-hover:opacity-70 hover:!opacity-100 text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-all duration-150"
+                              title={isMine ? 'Delete message' : 'Delete for me'}
+                              whileHover={{ scale: 1.15 }}
+                              whileTap={{ scale: 0.85 }}
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </motion.button>
                           )}
-                          {isMine && getMessageStatus(msg)}
                         </div>
                       </div>
                     </AnimatedMessageBubble>
@@ -1317,6 +1335,7 @@ export default function ChatView() {
                 className="hidden"
                 accept="image/*,application/pdf,.doc,.docx,.txt,.zip"
                 onChange={handleFileSelect}
+                aria-label="Upload file"
               />
             </div>
 
@@ -1632,10 +1651,10 @@ export default function ChatView() {
                 onClick={handleCloseContextMenu}
               />
               <motion.div
-                className="fixed bg-cipher-dark/95 backdrop-blur-md border border-gray-700 rounded-xl shadow-2xl py-2 min-w-[160px] z-[100]"
+                className="fixed bg-cipher-dark/95 backdrop-blur-md border border-gray-700 rounded-xl shadow-2xl py-2 min-w-[180px] z-[100]"
                 style={{
-                  left: Math.min(contextMenu.x, window.innerWidth - 180),
-                  top: Math.min(contextMenu.y, window.innerHeight - 120),
+                  left: Math.min(Math.max(contextMenu.x - 90, 8), window.innerWidth - 200),
+                  top: Math.min(Math.max(contextMenu.y + 4, 8), window.innerHeight - 140),
                 }}
                 initial={{ opacity: 0, scale: 0.9, y: -10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}

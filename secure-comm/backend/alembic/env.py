@@ -22,7 +22,10 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Get DATABASE_URL from environment or use SQLite as default
+# BUGFIX: Fix Render-style postgres:// → postgresql://
 database_url = os.getenv("DATABASE_URL", "sqlite:///./secure_comm.db")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here for 'autogenerate' support

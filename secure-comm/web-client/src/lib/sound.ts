@@ -13,11 +13,16 @@ let soundEnabled = true;
 let volume = 0.5;
 
 /**
- * Initialize audio context (must be called after user interaction)
+ * Initialize audio context (must be called after user interaction).
+ * AUDIT FIX: Also resumes suspended AudioContext (Chrome autoplay policy).
  */
 export function initAudioContext(): void {
   if (!audioContext && typeof window !== 'undefined') {
     audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  // Resume if suspended (Chrome requires user gesture before first playback)
+  if (audioContext && audioContext.state === 'suspended') {
+    audioContext.resume().catch(() => {});
   }
 }
 

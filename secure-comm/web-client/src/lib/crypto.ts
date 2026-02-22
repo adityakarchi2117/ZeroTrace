@@ -123,13 +123,8 @@ export function encryptMessage(
   senderPrivateKey: string,
   senderPublicKey?: string
 ): EncryptedMessage {
-  // Debug logging
-  console.log('🔐 Encrypting message:', {
-    recipientKeyPrefix: recipientPublicKey?.substring(0, 20),
-    senderPrivKeyPrefix: senderPrivateKey?.substring(0, 20),
-    senderPubKeyPrefix: senderPublicKey?.substring(0, 20),
-    hasSenderPubKey: !!senderPublicKey,
-  });
+  // AUDIT FIX: Removed debug logging that exposed private key prefixes
+  // Never log private key material, even partially
 
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   const messageBytes = decodeUTF8(message);
@@ -174,14 +169,11 @@ export function decryptMessage(
     // Prefer the embedded sender public key (v2), fallback to provided key (v1)
     const senderPublicKey = encrypted.senderPublicKey || senderPublicKeyFallback;
     
-    // Debug logging
+    // AUDIT FIX: Removed debug logging that exposed key prefixes
+    // Only log structural info, never key material
     console.log('🔓 Decryption attempt:', {
       version: encrypted.version || 'v1',
       hasEmbeddedKey: !!encrypted.senderPublicKey,
-      embeddedKeyPrefix: encrypted.senderPublicKey?.substring(0, 20),
-      fallbackKeyPrefix: senderPublicKeyFallback?.substring(0, 20),
-      usingKeyPrefix: senderPublicKey?.substring(0, 20),
-      recipientKeyPrefix: recipientPrivateKey?.substring(0, 20),
     });
     
     if (!senderPublicKey) {

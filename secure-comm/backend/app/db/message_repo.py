@@ -9,10 +9,10 @@ from sqlalchemy import or_, and_, not_
 # ... rest of imports
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
-from app.db.database import Message, User, MessageStatusEnum
+from app.db.database import Message, User, MessageStatusEnum, MessageTypeEnum, ExpiryTypeEnum
 
 
 class MessageRepository:
@@ -33,13 +33,25 @@ class MessageRepository:
         sender_theme: dict = None
     ) -> Message:
         """Create a new encrypted message."""
+        # Convert string to enum for PostgreSQL compatibility
+        msg_type_enum = MessageTypeEnum.TEXT
+        for mt in MessageTypeEnum:
+            if mt.value == message_type:
+                msg_type_enum = mt
+                break
+        exp_type_enum = ExpiryTypeEnum.NONE
+        for et in ExpiryTypeEnum:
+            if et.value == expiry_type:
+                exp_type_enum = et
+                break
+        
         message = Message(
             sender_id=sender_id,
             recipient_id=recipient_id,
             encrypted_content=encrypted_content,
             encrypted_key=encrypted_key,
-            message_type=message_type,
-            expiry_type=expiry_type,
+            message_type=msg_type_enum,
+            expiry_type=exp_type_enum,
             expires_at=expires_at,
             reply_to_id=reply_to_id,
             file_metadata=file_metadata,
@@ -99,9 +111,9 @@ class MessageRepository:
             message.status = status
             
             if status == MessageStatusEnum.DELIVERED:
-                message.delivered_at = datetime.utcnow()
+                message.delivered_at = datetime.now(timezone.utc)
             elif status == MessageStatusEnum.READ:
-                message.read_at = datetime.utcnow()
+                message.read_at = datetime.now(timezone.utc)
                 
                 # Handle "after_read" expiry
                 if message.expiry_type == "after_read":
@@ -130,7 +142,7 @@ class MessageRepository:
     
     def cleanup_expired(self) -> int:
         """Delete expired messages. Returns count of deleted messages."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         expired = self.db.query(Message).filter(
             Message.expires_at != None,

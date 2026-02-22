@@ -239,6 +239,7 @@ function ToastItem({
             <button
               onClick={() => onDismiss(notification.id)}
               className="p-1 text-slate-400 hover:text-white transition-colors"
+              title="Dismiss notification"
             >
               <X className="w-4 h-4" />
             </button>
@@ -444,6 +445,10 @@ export function useNotificationToasts(maxVisible: number = 3) {
   }, []);
 
   // Flush queue overflow after render (avoids setState inside setState)
+  // Flush queue overflow after render (avoids setState inside setState)
+  // NOTE: No dependency array is intentional — queueOverflow is a ref that
+  // gets set synchronously during notify() and must be flushed on the next
+  // render. The early-return guard prevents unnecessary state updates.
   useEffect(() => {
     const pending = queueOverflow.current;
     if (!pending) return;
@@ -457,9 +462,7 @@ export function useNotificationToasts(maxVisible: number = 3) {
       }
       return [...prevQueue, pending];
     });
-  });
-
-  // Promote from queue when there is room
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (visible.length < maxVisible && queue.length > 0) {
       const [next, ...rest] = queue;

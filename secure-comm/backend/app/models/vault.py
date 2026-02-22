@@ -40,6 +40,7 @@ class VaultItemUpdate(BaseModel):
     iv: Optional[str] = None
     encrypted_title: Optional[str] = None
     encrypted_tags: Optional[str] = None
+    expected_version: Optional[int] = None  # Optimistic locking: reject if stale
 
 
 class VaultItemResponse(VaultItemBase):

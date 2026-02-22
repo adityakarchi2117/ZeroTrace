@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from app.db.database import SessionLocal, VisibilityLevel, User, ProfileHistory, ProfileReport
+from app.db.database import SessionLocal, VisibilityLevel, User, ProfileHistory, ProfileReport, get_db
 from app.db.profile_repo import ProfileRepository
 from app.db.user_repo import UserRepository
 from app.models.profile import (
@@ -9,7 +9,7 @@ from app.models.profile import (
     ProfileReportCreate, ProfileHistoryEntry, RollbackRequest,
 )
 from app.core.security import get_current_user_id
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import os
 import json
@@ -18,14 +18,6 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # ---------- Helpers ----------
@@ -173,7 +165,10 @@ async def upload_photo(
         ext = ".jpg"
     safe_filename = f"{user_id}-{hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:16]}{ext}"
 
-    upload_dir = os.path.join("uploads", "avatars")
+    upload_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "uploads", "avatars"
+    )  # BUGFIX: Use absolute path based on project root, not CWD-relative
     os.makedirs(upload_dir, exist_ok=True)
     path = os.path.join(upload_dir, safe_filename)
 
@@ -284,7 +279,7 @@ async def export_profile(
             "last_seen_visibility": privacy.last_seen_visibility.value if hasattr(privacy.last_seen_visibility, 'value') else privacy.last_seen_visibility,
             "online_visibility": privacy.online_visibility.value if hasattr(privacy.online_visibility, 'value') else privacy.online_visibility,
         },
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

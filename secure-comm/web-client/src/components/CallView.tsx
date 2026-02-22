@@ -120,7 +120,7 @@ export function CallView({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   
-  const [pipPosition, setPipPosition] = useState({ x: window.innerWidth - 200, y: 100 });
+  const [pipPosition, setPipPosition] = useState({ x: typeof window !== 'undefined' ? window.innerWidth - 200 : 600, y: 100 });
   const [showLocalInPip, setShowLocalInPip] = useState(true);
   const [isSpeakerOff, setIsSpeakerOff] = useState(false);
   const [showControls, setShowControls] = useState(true);

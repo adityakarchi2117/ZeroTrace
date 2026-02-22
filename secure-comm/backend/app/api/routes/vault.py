@@ -7,7 +7,7 @@ All content encrypted client-side - server stores only ciphertext
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import secrets
 import base64
@@ -49,6 +49,14 @@ async def create_vault_item(
     Create a new encrypted vault item.
     All content is encrypted client-side before sending.
     """
+    # Enforce size limit on encrypted content (1 MB max)
+    MAX_CONTENT_SIZE = 1 * 1024 * 1024  # 1 MB
+    if item.encrypted_content and len(item.encrypted_content) > MAX_CONTENT_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Encrypted content exceeds maximum size of {MAX_CONTENT_SIZE} bytes"
+        )
+    
     vault_item = VaultItem(
         user_id=user_id,
         encrypted_content=item.encrypted_content,
@@ -93,7 +101,7 @@ async def list_vault_items(
                  .all()
     
     # Generate sync token
-    sync_token = generate_sync_token(user_id, datetime.utcnow())
+    sync_token = generate_sync_token(user_id, datetime.now(timezone.utc))
     
     return VaultItemList(
         items=items,
@@ -134,6 +142,7 @@ async def update_vault_item(
     """
     Update an existing vault item.
     Increments version for conflict detection.
+    Uses optimistic locking — if client version doesn't match, reject.
     """
     item = db.query(VaultItem).filter(
         VaultItem.id == item_id,
@@ -147,6 +156,24 @@ async def update_vault_item(
             detail="Vault item not found"
         )
     
+    # Optimistic locking: reject if client's version is stale
+    update_data = update.model_dump(exclude_unset=True)
+    expected_version = update_data.pop("expected_version", None)
+    if expected_version is not None and item.version != expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Version conflict: server has v{item.version}, client expected v{expected_version}"
+        )
+    
+    # Enforce size limit on encrypted content
+    if "encrypted_content" in update_data:
+        MAX_CONTENT_SIZE = 1 * 1024 * 1024
+        if update_data["encrypted_content"] and len(update_data["encrypted_content"]) > MAX_CONTENT_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Encrypted content exceeds maximum size of {MAX_CONTENT_SIZE} bytes"
+            )
+    
     # Update fields
     update_data = update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -154,7 +181,7 @@ async def update_vault_item(
     
     # Increment version
     item.version += 1
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(item)
@@ -188,7 +215,7 @@ async def delete_vault_item(
         db.delete(item)
     else:
         item.is_deleted = True
-        item.updated_at = datetime.utcnow()
+        item.updated_at = datetime.now(timezone.utc)
         item.version += 1
     
     db.commit()
@@ -208,7 +235,7 @@ async def sync_vault(
     last_sync_time = None
     
     if sync_request.last_sync_token:
-        last_sync_time = decode_sync_token(sync_request.last_sync_token)
+        last_sync_time = decode_sync_token(sync_request.last_sync_token, expected_user_id=user_id)
     
     # Get updated items
     query = db.query(VaultItem).filter(VaultItem.user_id == user_id)
@@ -223,30 +250,56 @@ async def sync_vault(
     deleted_ids = [i.id for i in items if i.is_deleted]
     
     # Generate new sync token
-    new_sync_token = generate_sync_token(user_id, datetime.utcnow())
+    new_sync_token = generate_sync_token(user_id, datetime.now(timezone.utc))
     
     return VaultSyncResponse(
         updated_items=updated_items,
         deleted_item_ids=deleted_ids,
         new_sync_token=new_sync_token,
-        server_time=datetime.utcnow()
+        server_time=datetime.now(timezone.utc)
     )
 
 
 # ============ Utility Functions ============
 
+def _get_signing_key() -> bytes:
+    """Get the app secret key for HMAC signing."""
+    from app.core.config import settings
+    return settings.SECRET_KEY.encode('utf-8')
+
+
 def generate_sync_token(user_id: int, timestamp: datetime) -> str:
-    """Generate sync token encoding user and timestamp"""
+    """Generate HMAC-signed sync token encoding user and timestamp."""
     data = f"{user_id}:{timestamp.isoformat()}"
-    # Simple encoding - in production use proper signing
-    return base64.urlsafe_b64encode(data.encode()).decode()
+    signature = hashlib.blake2b(
+        data.encode(),
+        key=_get_signing_key(),
+        digest_size=16,
+    ).hexdigest()
+    signed = f"{data}:{signature}"
+    return base64.urlsafe_b64encode(signed.encode()).decode()
 
 
-def decode_sync_token(token: str) -> Optional[datetime]:
-    """Decode sync token to get timestamp"""
+def decode_sync_token(token: str, expected_user_id: int = None) -> Optional[datetime]:
+    """Decode and verify HMAC-signed sync token to get timestamp."""
     try:
         data = base64.urlsafe_b64decode(token.encode()).decode()
-        _, timestamp_str = data.split(":", 1)
+        parts = data.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+        payload, received_sig = parts
+        # Verify signature
+        expected_sig = hashlib.blake2b(
+            payload.encode(),
+            key=_get_signing_key(),
+            digest_size=16,
+        ).hexdigest()
+        if not secrets.compare_digest(received_sig, expected_sig):
+            return None
+        user_id_str, timestamp_str = payload.split(":", 1)
+        # Verify user_id matches if provided
+        if expected_user_id is not None and int(user_id_str) != expected_user_id:
+            return None
         return datetime.fromisoformat(timestamp_str)
     except Exception:
         return None

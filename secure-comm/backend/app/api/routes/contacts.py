@@ -66,9 +66,16 @@ async def get_contacts(
         Contact.is_blocked == False
     ).all()
     
+    # Batch load all contact users in one query (fix N+1)
+    contact_user_ids = [c.contact_user_id for c in contacts]
+    if not contact_user_ids:
+        return []
+    contact_users = db.query(User).filter(User.id.in_(contact_user_ids)).all()
+    user_map = {u.id: u for u in contact_users}
+    
     result = []
     for contact in contacts:
-        contact_user = db.query(User).filter(User.id == contact.contact_user_id).first()
+        contact_user = user_map.get(contact.contact_user_id)
         if contact_user:
             result.append({
                 "id": contact.id,
@@ -198,8 +205,10 @@ async def search_users(
     db: Session = Depends(get_db)
 ):
     """Search for users by username"""
+    # Escape LIKE wildcard characters to prevent injection
+    safe_q = q.replace("%", "\\%").replace("_", "\\_")
     users = db.query(User).filter(
-        User.username.ilike(f"%{q}%"),
+        User.username.ilike(f"%{safe_q}%", escape="\\"),
         User.id != user_id,
         User.is_active == True
     ).limit(20).all()
@@ -267,31 +276,58 @@ async def get_conversations(
     
     all_partner_ids -= removed_contact_ids
     
+    if not all_partner_ids:
+        return []
+    
+    partner_id_list = list(all_partner_ids)
+    
+    # Batch load all partners and profiles in 2 queries (fix N+1)
+    partners = db.query(User).filter(User.id.in_(partner_id_list)).all()
+    partner_map = {p.id: p for p in partners}
+    
+    profiles = db.query(UserProfile).filter(UserProfile.user_id.in_(partner_id_list)).all()
+    profile_map = {p.user_id: p for p in profiles}
+    
+    # Batch get last message per partner using a window function approach
+    from sqlalchemy import case
+    partner_col = case(
+        (Message.sender_id == user_id, Message.recipient_id),
+        else_=Message.sender_id
+    ).label('partner_id')
+    
+    last_msg_subq = db.query(
+        partner_col,
+        func.max(Message.created_at).label('last_msg_time')
+    ).filter(
+        or_(
+            Message.sender_id == user_id,
+            Message.recipient_id == user_id
+        )
+    ).group_by('partner_id').all()
+    last_msg_time_map = {row.partner_id: row.last_msg_time for row in last_msg_subq}
+    
+    # Batch count unread per partner
+    unread_rows = db.query(
+        Message.sender_id,
+        func.count(Message.id)
+    ).filter(
+        Message.sender_id.in_(partner_id_list),
+        Message.recipient_id == user_id,
+        Message.status == MessageStatusEnum.SENT
+    ).group_by(Message.sender_id).all()
+    unread_map = {row[0]: row[1] for row in unread_rows}
+    
     conversations = []
-    for partner_id in all_partner_ids:
-        partner = db.query(User).filter(User.id == partner_id).first()
+    for pid in partner_id_list:
+        partner = partner_map.get(pid)
         if not partner:
             continue
         
-        # Get profile for display_name and avatar_url
-        profile = db.query(UserProfile).filter(UserProfile.user_id == partner_id).first()
+        profile = profile_map.get(pid)
         display_name = profile.display_name if profile and profile.display_name else None
         avatar_url = profile.avatar_url if profile and profile.avatar_url else None
         
-        # Get last message
-        last_message = db.query(Message).filter(
-            or_(
-                and_(Message.sender_id == user_id, Message.recipient_id == partner_id),
-                and_(Message.sender_id == partner_id, Message.recipient_id == user_id)
-            )
-        ).order_by(desc(Message.created_at)).first()
-        
-        # Count unread
-        unread_count = db.query(Message).filter(
-            Message.sender_id == partner_id,
-            Message.recipient_id == user_id,
-            Message.status == MessageStatusEnum.SENT
-        ).count()
+        last_msg_time = last_msg_time_map.get(pid)
         
         conversations.append({
             "user_id": partner.id,
@@ -300,9 +336,9 @@ async def get_conversations(
             "avatar_url": avatar_url,
             "public_key": partner.public_key,
             "identity_key": partner.identity_key,
-            "last_message_time": last_message.created_at.isoformat() if last_message else None,
-            "last_message_preview": "[Encrypted Message]" if last_message else None,
-            "unread_count": unread_count,
+            "last_message_time": last_msg_time.isoformat() if last_msg_time else None,
+            "last_message_preview": "[Encrypted Message]" if last_msg_time else None,
+            "unread_count": unread_map.get(pid, 0),
             "is_online": False
         })
     
